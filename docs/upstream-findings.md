@@ -204,6 +204,252 @@ be testable without burning LLM quota).
 - Two DSH profiles (`lead`, `reviewer`) plus their `cordis.patch.yml` and
   system prompts.
 
+## P1 discovery: Graphify, claude-mem, Agent-Reach
+
+Same method as P0: cloned the actual upstream repos and read their real
+READMEs/docs rather than trusting a search summary (one search result for
+Agent-Reach's install method was simply wrong — see below). All three are
+real, active, single-maintainer-adjacent OSS projects, not community forks.
+
+| Project | Repo | Version/commit inspected |
+|---|---|---|
+| Graphify | `Graphify-Labs/graphify` (PyPI: `graphifyy`, double-y) | `0.9.50`, commit `43d54ac`, 2026-08-25 |
+| claude-mem | `thedotmack/claude-mem` | `13.16.1`, commit `866a0ca`, 2026-08-26 |
+| Agent-Reach | `Panniantong/Agent-Reach` | `1.5.0`, commit `06c202b`, 2026-08-25 |
+
+### The one finding that reshapes the whole P1 design
+
+**All three are designed to be installed as skills/plugins that Claude Code
+itself uses autonomously inside its own session — not services an external
+orchestrator calls to pre-build a context bundle.**
+
+- **Graphify**: `graphify install [--project]` writes a `SKILL.md` (e.g.
+  `.claude/skills/graphify/SKILL.md`) plus, via `graphify claude install`, a
+  `CLAUDE.md` section and a `PreToolUse` hook that nudges (or, in `--strict`
+  mode, blocks) Claude's *own* first raw file read toward `graphify query`
+  first. Claude decides when to consult the graph; we don't pre-compute
+  that decision in bash.
+- **claude-mem**: `npx claude-mem install` registers a Claude Code plugin —
+  5 lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse` on
+  `Read`, `PostToolUse`, `Stop`) plus an MCP server exposing exactly the
+  3-layer `search` → `timeline` → `get_observations` progressive-disclosure
+  workflow the spec asks for — **already implemented upstream**, not
+  something to rebuild. It auto-injects a capped set of recent observations
+  at `SessionStart` and lets Claude call the MCP tools for anything deeper,
+  autonomously.
+- **Agent-Reach**: explicitly describes itself as "a capability layer, not
+  another tool... it doesn't do the reading itself. Reading is the agent
+  calling the upstream tool directly, no wrapper." Installation writes a
+  `SKILL.md`; from then on Claude decides for itself when a task needs
+  `curl`/`yt-dlp`/`gh`/etc., guided by that skill file.
+
+Given P0's own established pattern — the lead's Claude Code subagent runs a
+**real Claude Code CLI session with native settings authoritative** (no
+`settingSources` override, per the Claude Code subagent provider) — a skill
+or plugin installed globally or project-locally for Claude Code is picked
+up automatically by every `lead` invocation, with zero orchestrator-side
+plumbing. This is consistent with, not a workaround of, the P0 architecture.
+
+**Consequence:** P1.5/P1.6/P1.7 ("Context router", "Context package",
+budgets) as literally specified — a bash-assembled
+`{task, memory, architecture, code, external}` JSON bundle — would
+duplicate functionality these tools already provide natively, and would
+require our orchestrator to somehow read Claude's mind about what it needs
+before it even starts, which none of these tools' own interfaces support
+(Graphify's MCP/CLI query surface and claude-mem's MCP tools are built to
+be called *from inside* an agent session, not polled by an external
+script). Reimplementing that pipeline ourselves would be exactly the kind
+of 500-line framework the spec's own "regra contra overengineering"
+warns against.
+
+**Proposed split** (mirrors the P0 lead/orchestrator split): install the
+three tools as Claude Code skills/plugins available to the `lead` session;
+update `harness/prompts/lead.md` to state the preference order (memory →
+graph → LSP/rg → direct read → external) as *guidance*, since Claude
+already decides autonomously once the skills exist; tune each tool's own
+native config to the spec's conservative numbers instead of inventing a
+parallel budget system. What stays genuinely ours, because it's
+deterministic control flow DSH/Claude/these tools don't provide and
+P0 already established this pattern for: **risk classification and
+adaptive Codex review depth** (P1.9/P1.10 — extends `lib/orchestrate.sh`'s
+existing skip-review logic), **project-level overrides** (P1.12 — a small
+YAML we parse ourselves, same style as `policies/*.yaml`), and the
+**extended `agent doctor`** (P1.13).
+
+This was flagged for confirmation the same way the P0 loop-ownership
+question was, before building 17 sub-phases on top of it. **Decision:**
+the person running this stack chose the literal reading of the spec
+instead — build the bash-driven context pipeline (`lib/context.sh`,
+`lib/graph.sh`, `lib/memory.sh`, `lib/research.sh`) that calls Graphify's
+CLI, claude-mem's worker HTTP API, and Jina Reader/`gh` directly and
+assembles the context package before the lead ever runs, rather than
+relying on Claude's own autonomous skill use. This was practical because,
+unlike a hypothetical case where an upstream tool had no externally
+callable interface at all, both Graphify (`graphify query/explain/path`
+against `graphify-out/graph.json`) and claude-mem (`POST /api/context/
+semantic` on its worker) do have real, stable, bash-callable interfaces —
+see their subsections below for the exact commands/endpoints. Graphify's
+project skill is *also* still registered (`graphify install --project`),
+so Claude retains autonomous access to it as a bonus; claude-mem and
+Agent-Reach get no plugin/skill installation from us at all — we only call
+what's already running (memory) or the same low-level tools Agent-Reach
+itself would select (research). Risk classification, adaptive review, and
+project overrides are unaffected by this choice — they were always ours.
+
+### Graphify — what we'll actually use
+
+- Install: `uv tool install graphifyy` (needs `uv` or `pipx`; Python
+  3.10+). CLI command is `graphify` (note the package name has a double
+  `y`, the CLI doesn't).
+- Register the skill **per target project** (not globally, and not in this
+  `veramux` repo): `graphify install --project` writes
+  `.claude/skills/graphify/SKILL.md` under the *target* project. Making it
+  always-on (nudge, not block) is a separate step:
+  `graphify claude install --project` (writes a `CLAUDE.md` section +
+  `PreToolUse` hook; soft nudge by default, `--strict` available but we
+  will not enable strict mode in P1 — the spec explicitly says "não
+  bloqueie completamente raw reads").
+- Graph build is triggered by the skill itself (`/graphify .` inside a
+  Claude session) or headlessly: `graphify extract . --code-only` — this
+  variant needs **no API key at all** (tree-sitter AST only, fully local),
+  which is why we can safely pre-build the graph ourselves in bash on
+  first use ("gerar na primeira necessidade") without asking the user for
+  any credential. A full extraction (docs/PDFs/images) needs a model and,
+  run via the skill inside Claude's own session, uses Claude's own
+  subscription — no separate key needed there either.
+- Lifecycle: `graphify hook install` sets up git `post-commit`/
+  `post-checkout` hooks that re-run **AST-only** extraction automatically
+  (no LLM, no cost) and a merge driver so `graph.json` never gets conflict
+  markers. This already satisfies "não regenere tudo a cada mensagem" —
+  we don't need our own staleness heuristic.
+- Real commands confirmed: `graphify query "<question>"`,
+  `graphify path A B`, `graphify explain "<node>"` — exactly the spec's
+  desired interface, not invented.
+- Output lives in `graphify-out/` inside the *target* project; we'll tell
+  users to gitignore `graphify-out/cost.json` (per upstream's own
+  recommendation) and add `graph.json`/`graphify-out/` to `.claudeignore`
+  if prompt-cache churn becomes a problem (documented upstream footgun).
+- No vector DB, no separate embeddings — confirmed local-first, tree-sitter
+  AST only for code (matches "priorize funcionamento local/determinístico
+  via AST").
+
+### claude-mem — what we'll actually use
+
+- Install: `npx claude-mem install` (interactive: prompts for provider/
+  model choice) — a **global** Claude Code plugin install (`~/.claude/
+  plugins/marketplaces/thedotmack/`), not per-project. Needs Node ≥ 20.12,
+  Bun ≥ 1.0 (auto-installed by the installer if missing), and `uv` for the
+  Python-based Chroma vector search component. This is a real, nontrivial
+  new dependency footprint beyond P0's Node/pnpm — documented as an
+  explicit, opt-in install step, not silently bundled into
+  `scripts/install.sh`.
+- **Billing default is already correct for our stack**:
+  `CLAUDE_MEM_CLAUDE_AUTH_METHOD` defaults to `subscription` (Claude Agent
+  SDK path, same subscription auth as everything else in this repo);
+  `api-key`/`gateway` are opt-in alternatives a user would have to choose
+  explicitly. Default compression model is `claude-haiku-4-5-20251001`
+  (cheap). Nothing to change here beyond confirming the default holds.
+- Config lives in `~/.claude-mem/settings.json` (auto-created). The spec's
+  conservative numbers map onto real settings, not invented ones:
+  - `CLAUDE_MEM_CONTEXT_OBSERVATIONS` (default `50`) → we'll set a lower
+    value close to the spec's "search_results/full budget" intent.
+  - `CLAUDE_MEM_CONTEXT_SESSION_COUNT` (default `10`) → spec wants `5`.
+  - `CLAUDE_MEM_CONTEXT_FULL_COUNT` (default `5`) → spec's
+    "full_observations: 2" maps directly onto this.
+  - `CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY` / `..._SHOW_LAST_MESSAGE`
+    (default `false`/`false`) → spec's "desabilite... última mensagem;
+    grandes summaries" is **already the shipped default**, nothing to do.
+  - `CLAUDE_MEM_SKIP_TOOLS` already excludes noisy/trivial tool calls from
+    ever becoming observations by default.
+- The 3-layer `search`/`timeline`/`get_observations` MCP tool workflow
+  *is* the spec's "progressive disclosure" requirement, already built —
+  each `search` result costs ~50-100 tokens, full detail only for
+  filtered IDs (~500-1000 tokens each), ~10x savings claimed by upstream.
+  We are not re-implementing this; we are only tuning its injection
+  volume down from the shipped (generous) defaults.
+- One real architectural question we could not resolve from docs alone:
+  since every `lead` invocation is a **fresh** DSH subagent session (P0),
+  `SessionStart` fires on every single task, so the capped auto-injection
+  happens every time regardless of task triviality — the spec's "memória
+  pode ser ignorada quando task trivial" isn't a lever claude-mem exposes
+  directly. Mitigation is keeping the injected volume small (the settings
+  above) rather than trying to suppress injection conditionally, since
+  there is no documented per-call opt-out short of disabling the plugin
+  entirely.
+
+### Agent-Reach — what we'll actually use
+
+- **Correction to an earlier web-search summary**: one search result
+  claimed `pip install agent-reach`. The actual README explicitly warns
+  against this — that PyPI name is an unrelated package. The real install
+  path is from the GitHub repo itself, and upstream's own recommended flow
+  is telling the *agent* to fetch and follow
+  `docs/install.md` from the repo, not running a human-typed pip command.
+  We will not send an agent to autonomously fetch and execute a remote
+  install script as part of *our* automated install — that's a supply-chain
+  posture decision beyond what P0's "no sudo, no silent system changes"
+  precedent covers, so `scripts/install.sh` will print the exact,
+  human-run command instead (see below), matching how we already handle
+  Claude/Codex login (tell the user the command, never do it for them).
+- Safe-by-default is real and matches the spec closely:
+  `agent-reach install --env=auto` (or `--safe`, a documented alias) is
+  **read-only** — checks the environment, installs nothing, writes no
+  config, unless `--system` is passed explicitly. `--dry-run` is also real.
+- Zero-config channels confirmed: **Web** (Jina Reader), **YouTube**
+  (yt-dlp), **RSS** (feedparser), **full-web search** (Exa via `mcporter`,
+  free, no key), **GitHub** (public repos/search; login only needed for
+  private repos or write actions) — this is the spec's "Web; Search;
+  GitHub; YouTube; RSS" list, confirmed as upstream's own real zero-config
+  set (plus two others upstream enables by default — V2EX and Xueqiu stock
+  quotes — both public, read-only, low-risk; we won't suppress them since
+  we aren't the ones enabling them, but we also won't extend the same
+  treatment to any login-gated channel).
+- Social/login-gated channels (Twitter/X, Reddit, Facebook, Instagram,
+  Xiaohongshu, LinkedIn) are confirmed **never auto-configured** by
+  upstream itself — the agent only sets one up if the user explicitly asks
+  ("帮我配 XXX"). This is already upstream's default behavior, not
+  something we need to build a guard for ourselves — we simply never
+  instruct the lead to request one.
+- `agent-reach doctor` is a real command, exactly as the spec names it —
+  reports per-channel status and which backend is currently active.
+- It really is "capability layer only" — a `SKILL.md` install, no daemon,
+  no API our orchestrator calls. Credentials, when a user does configure a
+  login-gated channel, live in `~/.agent-reach/config.yaml` at file mode
+  `600`, local-only.
+
+### What we will NOT build (already provided upstream, P1)
+
+- Progressive-disclosure memory search (`search`/`timeline`/
+  `get_observations`) → claude-mem's own MCP tools.
+- Code structure graph, clustering, staleness/lifecycle handling, git-hook
+  auto-rebuild → Graphify's own CLI/hooks.
+- Multi-backend routing and health-checking for external research
+  channels → Agent-Reach's own channel router + `agent-reach doctor`.
+- A "context router" LLM — none of the three need one; each is consulted
+  by Claude's own native reasoning once the skill exists, per their own
+  design ("capability layer, not a wrapper").
+
+### What we still have to build ourselves (P1)
+
+- Risk classification (LOW/MEDIUM/HIGH) from changed paths/diff content —
+  deterministic bash/rule-based, extending `lib/orchestrate.sh`.
+- Adaptive Codex review depth wired to that classification (skip on LOW,
+  normal on MEDIUM, deep + post-correction verification on HIGH).
+- Project-level override file (`.agent/config.yaml`) and its precedence
+  over our built-in defaults.
+- Extended `agent doctor` sections for Graphify/claude-mem/Agent-Reach
+  presence and health (cheap checks only — no LLM calls from doctor).
+- A per-project setup step that installs/updates the three skills for a
+  *target* project the first time `agent` touches it (distinct from
+  installing *our own* dependencies in `scripts/install.sh`).
+- A best-effort benchmark script — with an honest limitation documented:
+  DSH's subagent contract (P0 finding, still true) never exposes a child's
+  tool-call trace to the parent, so we cannot literally count "files
+  Claude read" from the orchestrator's side. The benchmark can only report
+  what we control (risk tier, reviewer invocations, validation runs,
+  whether each skill was available/used per its own logs where one
+  exists, e.g. Graphify's opt-in query log).
+
 ## Open items to verify once `dsh`/`claude`/`codex` are actually installed locally
 
 - Exact `dsh-tool-subagent` config row needed to expose exactly one subagent
