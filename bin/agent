@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Single entry point: `agent`, `agent .`, `agent /path`, `agent doctor`,
+# `agent --help`, `agent --version`. See README.md for the full behavior.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=../lib/environment.sh
+source "$ROOT_DIR/lib/environment.sh"
+# shellcheck source=../lib/project.sh
+source "$ROOT_DIR/lib/project.sh"
+# shellcheck source=../lib/validation.sh
+source "$ROOT_DIR/lib/validation.sh"
+# shellcheck source=../lib/redact.sh
+source "$ROOT_DIR/lib/redact.sh"
+# shellcheck source=../lib/orchestrate.sh
+source "$ROOT_DIR/lib/orchestrate.sh"
+
+agent_version() {
+  grep 'tested_version:' "$ROOT_DIR/versions.yaml" | head -1 | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+agent_help() {
+  cat <<EOF
+agent — single entry point for the DeepSeek Harness + Claude Code + Codex stack
+
+Usage:
+  agent                        Run in the current directory; prompts for a task
+  agent .                      Same as above, explicit path
+  agent /path/to/repo          Run in another project directory
+  agent /path/to/repo "task"   Run a specific task non-interactively
+  agent doctor [/path]         Run environment/setup checks (see README)
+  agent --help                 Show this message
+  agent --version              Show this stack's tested version pins
+
+If no task text is given, agent reads one line from stdin when input is
+piped, or prompts interactively when attached to a terminal.
+
+What it does: resolves the workspace, sends the task to the 'lead' DSH
+profile (Claude Code, real write/edit access), collects git status/diff,
+runs the project's own test/lint/typecheck, sends an independent review
+package to the 'reviewer' DSH profile (Codex, mechanism-enforced
+read-only), and — if Codex reports a blocking finding — sends it back to
+Claude for up to 2 correction rounds (policies/orchestration.yaml). It
+never runs git push, git commit, or a deploy command on its own.
+EOF
+}
+
+agent_read_task_interactively() {
+  if [ -t 0 ]; then
+    local task
+    read -r -p "Task: " task
+    printf '%s' "$task"
+  else
+    cat
+  fi
+}
+
+main() {
+  case "${1:-}" in
+    --help|-h)
+      agent_help
+      exit 0
+      ;;
+    --version|-v)
+      echo "agent (this stack): $(agent_version)"
+      exit 0
+      ;;
+    doctor)
+      shift
+      exec "$ROOT_DIR/scripts/doctor.sh" "$@"
+      ;;
+  esac
+
+  local workspace_arg="." task=""
+  if [ $# -gt 0 ]; then
+    if [ -d "$1" ]; then
+      workspace_arg="$1"
+      shift
+      task="$*"
+    else
+      task="$*"
+    fi
+  fi
+
+  local workspace
+  if ! workspace="$(project_resolve_workspace "$workspace_arg")"; then
+    exit 1
+  fi
+
+  if [ -z "$task" ]; then
+    task="$(agent_read_task_interactively)"
+  fi
+  if [ -z "$(printf '%s' "$task" | tr -d '[:space:]')" ]; then
+    echo "error: no task provided" >&2
+    exit 1
+  fi
+
+  echo "workspace: $workspace"
+  orchestrate_run "$workspace" "$task"
+}
+
+main "$@"
