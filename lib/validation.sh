@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Validation command detection + runner (P0.4).
+# Sourced by bin/agent. Must not be executed directly.
+set -euo pipefail
+
+_VALIDATION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+validation_node_script() {
+  local dir="$1" name="$2"
+  node -e '
+    const fs = require("fs");
+    const [pkgPath, name] = process.argv.slice(1);
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+      const script = pkg.scripts && pkg.scripts[name];
+      if (typeof script === "string" && script.trim()) process.stdout.write(script.trim());
+    } catch {}
+  ' "$dir/package.json" "$name" 2>/dev/null
+}
+
+# Prints "label<TAB>command" lines, in priority order: test, lint, typecheck,
+# build. Never invents a command that isn't declared by the project itself.
+validation_detect_commands() {
+  local dir="$1" force_build="${2:-false}"
+  local emitted=0
+
+  if [ -f "$dir/package.json" ]; then
+    local test_script lint_script typecheck_script build_script have_test=0 have_typecheck=0
+    test_script="$(validation_node_script "$dir" test)"
+    if [ -n "$test_script" ] && [ "$test_script" != 'echo "Error: no test specified" && exit 1' ]; then
+      printf 'test\tnpm test\n'
+      have_test=1
+      emitted=1
+    fi
+    lint_script="$(validation_node_script "$dir" lint)"
+    if [ -n "$lint_script" ]; then
+      printf 'lint\tnpm run lint\n'
+      emitted=1
+    fi
+    typecheck_script="$(validation_node_script "$dir" typecheck)"
+    if [ -n "$typecheck_script" ]; then
+      printf 'typecheck\tnpm run typecheck\n'
+      have_typecheck=1
+      emitted=1
+    fi
+    build_script="$(validation_node_script "$dir" build)"
+    if [ -n "$build_script" ]; then
+      if [ "$force_build" = "true" ] || { [ "$have_test" -eq 0 ] && [ "$have_typecheck" -eq 0 ]; }; then
+        printf 'build\tnpm run build\n'
+        emitted=1
+      fi
+    fi
+    [ "$emitted" -eq 1 ] && return 0
+  fi
+
+  if [ -f "$dir/pyproject.toml" ] || [ -f "$dir/setup.py" ] || [ -f "$dir/requirements.txt" ]; then
+    local pytest_available=0 ruff_configured=0 mypy_configured=0
+    if env_has_cmd pytest || python3 -c 'import pytest' >/dev/null 2>&1; then
+      if [ -d "$dir/tests" ] || [ -d "$dir/test" ] || grep -qE '\[tool\.pytest' "$dir/pyproject.toml" 2>/dev/null; then
+        pytest_available=1
+      fi
+    fi
+    [ "$pytest_available" -eq 1 ] && printf 'test\tpython3 -m pytest\n' && emitted=1
+
+    if grep -qE '\[tool\.ruff\]' "$dir/pyproject.toml" 2>/dev/null || [ -f "$dir/ruff.toml" ] || [ -f "$dir/.ruff.toml" ]; then
+      ruff_configured=1
+    fi
+    if env_has_cmd ruff && [ "$ruff_configured" -eq 1 ]; then
+      printf 'lint\truff check .\n'
+      emitted=1
+    fi
+
+    if grep -qE '\[tool\.mypy\]' "$dir/pyproject.toml" 2>/dev/null || [ -f "$dir/mypy.ini" ]; then
+      mypy_configured=1
+    elif [ -f "$dir/setup.cfg" ] && grep -q '\[mypy\]' "$dir/setup.cfg" 2>/dev/null; then
+      mypy_configured=1
+    fi
+    if env_has_cmd mypy && [ "$mypy_configured" -eq 1 ]; then
+      printf 'typecheck\tmypy .\n'
+      emitted=1
+    fi
+    [ "$emitted" -eq 1 ] && return 0
+  fi
+
+  if [ -f "$dir/Makefile" ]; then
+    local target
+    for target in test lint typecheck build; do
+      if [ "$target" = "build" ] && [ "$force_build" != "true" ]; then
+        grep -qE '^test:|^lint:|^typecheck:' "$dir/Makefile" >/dev/null 2>&1 && continue
+      fi
+      if grep -qE "^${target}:" "$dir/Makefile" 2>/dev/null; then
+        printf '%s\tmake %s\n' "$target" "$target"
+        emitted=1
+      fi
+    done
+    [ "$emitted" -eq 1 ] && return 0
+  fi
+
+  return 0
+}
+
+# Runs each "label<TAB>command" pair from stdin inside $dir, logging what it
+# runs (the project's own script text is treated as project code, not ours:
+# it is always echoed before execution). Writes the structured JSON result
+# to $out_json. Returns 1 if any command failed (caller decides what that means).
+validation_run() {
+  local dir="$1" out_json="$2"
+  local status_lines="" any_failed=0
+  local label command
+
+  while IFS=$'\t' read -r label command; do
+    [ -z "$label" ] && continue
+    echo "+ validation[$label]: $command" >&2
+    if (cd "$dir" && bash -c "$command") >&2; then
+      status_lines+="passed"$'\t'"$label: $command"$'\n'
+    else
+      status_lines+="failed"$'\t'"$label: $command"$'\n'
+      any_failed=1
+    fi
+  done
+
+  printf '%s' "$status_lines" | node "$_VALIDATION_LIB_DIR/json-tools.mjs" build-validation-result > "$out_json"
+  [ "$any_failed" -eq 0 ]
+}

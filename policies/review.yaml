@@ -1,0 +1,32 @@
+# Reference schema for the Codex review contract (P0.6). This file documents
+# the contract for humans; it is not parsed at runtime. Enforcement lives in
+# lib/json-tools.mjs (validate-review / blocking-findings), which is the
+# single source of truth — keep this comment in sync with it by hand.
+#
+# {
+#   "verdict": "approved | changes_requested",
+#   "summary": "string, non-empty",
+#   "findings": [
+#     {
+#       "severity": "critical | high | medium | low",
+#       "category": "security | correctness | regression | performance | maintainability | tests | other",
+#       "file": "path relative to repo root, or null when not localized",
+#       "line": 123,               // integer or null
+#       "problem": "objective description of what's wrong",
+#       "reason": "why this is a problem",
+#       "recommendation": "how to fix it"
+#     }
+#   ]
+# }
+#
+# Rules enforced by lib/orchestrate.sh (not the schema validator):
+# - "approved" with a critical/high finding present is treated as a
+#   malformed response and triggers the one allowed retry (P0.6), because it
+#   contradicts the spec's "approved implies no relevant critical/high
+#   findings" rule.
+# - Only "critical" and "high" findings are sent back to Claude for
+#   correction (lib/json-tools.mjs blocking-findings). "medium"/"low"
+#   findings are reported in the final summary but never block.
+# - The reviewer must not be scored on aesthetic/cosmetic preferences,
+#   optional refactors, or subjective style opinions — this is instructed in
+#   harness/prompts/reviewer.md, not re-validated in code.
