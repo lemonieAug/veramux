@@ -8,10 +8,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=../lib/environment.sh
 source "$ROOT_DIR/lib/environment.sh"
+# shellcheck source=../lib/policy.sh
+source "$ROOT_DIR/lib/policy.sh"
 # shellcheck source=../lib/project.sh
 source "$ROOT_DIR/lib/project.sh"
+# shellcheck source=../lib/project_config.sh
+source "$ROOT_DIR/lib/project_config.sh"
 # shellcheck source=../lib/validation.sh
 source "$ROOT_DIR/lib/validation.sh"
+# shellcheck source=../lib/graph.sh
+source "$ROOT_DIR/lib/graph.sh"
+# shellcheck source=../lib/memory.sh
+source "$ROOT_DIR/lib/memory.sh"
+# shellcheck source=../lib/risk.sh
+source "$ROOT_DIR/lib/risk.sh"
 
 DSH_HOME_DIR="$(env_dsh_home)"
 FAILURES=0
@@ -122,6 +132,54 @@ else
   fi
 fi
 
+section "Context (P1 — all optional, never required for P0 behavior)"
+if graph_available; then
+  ok "Graphify installed ($(graphify --version 2>/dev/null || echo 'version unknown'))"
+else
+  info "Graphify not installed — optional. See README 'Context tools' for the install command."
+fi
+if [ -f "$HOME/.claude-mem/settings.json" ] || [ -d "$HOME/.claude/plugins/marketplaces/thedotmack" ]; then
+  ok "claude-mem installed"
+  if memory_available; then
+    ok "claude-mem worker responding on $(memory_worker_url)"
+  else
+    bad "claude-mem installed but its worker is not responding on $(memory_worker_url) — it should auto-start on the next Claude Code session"
+  fi
+else
+  info "claude-mem not installed — optional. See README 'Context tools' for the install command."
+fi
+
+section "Research (P1 — all optional)"
+if env_has_cmd curl; then
+  ok "curl present (needed for the built-in web/search research path)"
+else
+  bad "curl not found — external research (web fetch/search) will be unavailable"
+fi
+if env_has_cmd gh; then
+  ok "gh CLI present ($(gh --version 2>/dev/null | head -1 || echo 'version unknown'))"
+else
+  info "gh CLI not installed — optional, only used for GitHub-specific research"
+fi
+if env_has_cmd agent-reach; then
+  ok "Agent-Reach installed — run 'agent-reach doctor' yourself for per-channel status"
+else
+  info "Agent-Reach not installed — optional; the built-in web/search/GitHub research path works without it. See README."
+fi
+
+section "Policy (P1)"
+for policy_file in orchestration.yaml risk.yaml context.yaml safety.yaml review.yaml; do
+  if [ -f "$ROOT_DIR/policies/$policy_file" ]; then
+    ok "policies/$policy_file present"
+  else
+    crit "policies/$policy_file missing"
+  fi
+done
+if grep -q '^max_correction_rounds:' "$ROOT_DIR/policies/orchestration.yaml" 2>/dev/null; then
+  ok "orchestration.yaml parses (max_correction_rounds found)"
+else
+  crit "orchestration.yaml missing max_correction_rounds"
+fi
+
 PROJECT_PATH="${1:-}"
 if [ -n "$PROJECT_PATH" ]; then
   section "Project ($PROJECT_PATH)"
@@ -144,6 +202,18 @@ if [ -n "$PROJECT_PATH" ]; then
       echo "$COMMANDS" | while IFS=$'\t' read -r label cmd; do info "$label: $cmd"; done
     else
       info "no validation commands detected"
+    fi
+    if project_config_exists "$RESOLVED"; then
+      ok "project override found: $(project_config_path "$RESOLVED")"
+    else
+      info "no .agent/config.yaml — using built-in defaults"
+    fi
+    if graph_available; then
+      if graph_is_ready "$RESOLVED"; then
+        ok "knowledge graph available for this project"
+      else
+        info "Graphify is installed but no graph exists yet for this project — built automatically on first use"
+      fi
     fi
   else
     crit "$RESOLVED"

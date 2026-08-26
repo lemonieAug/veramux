@@ -70,6 +70,48 @@ print_auth_instructions() {
   echo "  Set DEEPSEEK_API_KEY in your environment or in \$DSH_HOME/.env."
 }
 
+# P1 context tools are optional and never auto-installed here: Graphify and
+# claude-mem pull in real new runtime dependencies (Python/uv, Bun) and, for
+# claude-mem, a global Claude Code plugin install — a bigger footprint than
+# P0's own dependencies, so it gets the same treatment as Claude/Codex login:
+# print the exact command, let the user decide. Once installed, lib/graph.sh
+# and lib/memory.sh detect and use them automatically — no further setup.
+print_context_tool_instructions() {
+  echo
+  echo "== Optional P1 context tools (not installed automatically) =="
+  if env_has_cmd graphify; then
+    say "Graphify: already installed ($(graphify --version 2>/dev/null || echo 'version unknown'))."
+  else
+    echo "Graphify (code structure graph, fully local for code — no API key needed):"
+    echo "  uv tool install graphifyy   # or: pipx install graphifyy"
+    echo "  (nothing else to do — 'agent' registers and builds the graph per"
+    echo "   project automatically the first time it's useful)"
+  fi
+  echo
+  if [ -f "$HOME/.claude-mem/settings.json" ] || [ -d "$HOME/.claude/plugins/marketplaces/thedotmack" ]; then
+    say "claude-mem: already installed."
+  else
+    echo "claude-mem (persistent memory across sessions, subscription-based"
+    echo "compression by default, not API billing):"
+    echo "  npx claude-mem install"
+    echo "  (needs Node >= 20.12, and installs Bun + uv itself if missing —"
+    echo "   review its prompts before continuing)"
+  fi
+  echo
+  if env_has_cmd agent-reach; then
+    say "Agent-Reach: already installed."
+  else
+    echo "Agent-Reach (external research, optional): the built-in web/search/"
+    echo "GitHub research path (lib/research.sh) works without it. If you want"
+    echo "the fuller channel set (YouTube, RSS, and more), see:"
+    echo "  https://github.com/Panniantong/Agent-Reach"
+    echo "  We do not run its installer for you — it is designed to be run by"
+    echo "  telling an agent to fetch and follow its own install.md, which is"
+    echo "  a deliberate choice you should make yourself, not something this"
+    echo "  script does on your behalf."
+  fi
+}
+
 main() {
   echo "== DeepSeek Harness agent stack: install =="
   check_node
@@ -79,6 +121,7 @@ main() {
   echo "Core tools ready. Configuring profiles..."
   "$SCRIPT_DIR/configure.sh"
   print_auth_instructions
+  print_context_tool_instructions
   echo
   echo "Next: agent doctor"
 }
