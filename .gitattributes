@@ -4,6 +4,8 @@
 *.sh text eol=lf
 bin/agent text eol=lf
 tests/fixtures/mock-dsh/dsh text eol=lf
+tests/fixtures/mock-graphify/graphify text eol=lf
+tests/fixtures/mock-curl/curl text eol=lf
 *.mjs text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
