@@ -1,0 +1,40 @@
+# Safety policy consumed by lib/environment.sh and lib/redact.sh.
+#
+# This is intentionally a small, line-based file we parse ourselves (grep/sed),
+# not general YAML — see README "Segurança" for why we didn't add a YAML
+# parser dependency for something this narrow.
+
+# Glob patterns (matched against both the full repo-relative path and the
+# basename) whose diff content is never forwarded to the Codex reviewer.
+# The filename still appears (so the reviewer knows a file changed) but its
+# content is replaced with a placeholder. This does not rely on .gitignore.
+ignore_patterns:
+  - ".env"
+  - ".env.*"
+  - "*.pem"
+  - "*.key"
+  - "credentials*"
+  - "secrets*"
+  - "id_rsa"
+  - "id_ed25519"
+  - "*.pfx"
+  - "*.p12"
+  - ".ssh/*"
+  - "*.crt"
+
+# Must stay false for P0. If a subagent provider's cordis.patch.yml ever
+# needs to forward ANTHROPIC_API_KEY/OPENAI_API_KEY explicitly (accepting
+# pay-per-token billing instead of the authenticated subscription session),
+# that is a deliberate, reviewed decision — flip this only alongside a commit
+# that explains why, so `agent doctor` stops treating it as an error.
+allow_explicit_api_key_billing: false
+
+# Commands the orchestration loop must never run on its own, regardless of
+# what a subagent suggests. Enforced in lib/orchestrate.sh, not just here.
+forbidden_commands:
+  - "git push"
+  - "git push --force"
+  - "git push -f"
+  - "git reset --hard"
+  - "npm publish"
+  - "pnpm publish"
