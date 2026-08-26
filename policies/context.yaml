@@ -1,0 +1,34 @@
+# Context budgets and routing flags for P1 (lib/context.sh, lib/graph.sh,
+# lib/memory.sh, lib/research.sh). Small, line-based file we parse ourselves
+# (grep), not general YAML — see policies/safety.yaml for why. Values are
+# character counts, not tokens: measuring tokens exactly would add a
+# dependency for no material benefit at this scale (see
+# docs/upstream-findings.md).
+
+routing:
+  memory_first: true
+  graph_before_mass_read: true
+  local_before_external: true
+
+memory:
+  enabled: true
+  max_results: 5
+  max_chars: 4000
+
+graph:
+  enabled: true
+  max_results: 10
+  max_chars: 8000
+  direct_reads_before_graph: 3
+
+source:
+  initial_max_chars: 30000
+
+external:
+  enabled: true
+  max_results: 5
+  max_pages: 3
+  max_chars: 10000
+
+review:
+  prefer_diff: true
