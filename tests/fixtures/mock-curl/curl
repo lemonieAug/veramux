@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Mock `curl` for tests/unit/test_research.sh, so the unit suite never
+# depends on real network access (Jina Reader/search). Not part of the
+# production path. Recognizes just enough of the real invocations
+# lib/research.sh makes to exercise its logic.
+set -euo pipefail
+args="$*"
+case "$args" in
+  *r.jina.ai*)
+    echo "MOCK PAGE CONTENT"
+    ;;
+  *s.jina.ai*)
+    echo "MOCK SEARCH RESULT 1"
+    echo "MOCK SEARCH RESULT 2"
+    ;;
+  *)
+    echo "mock-curl: unhandled args: $args" >&2
+    exit 1
+    ;;
+esac
