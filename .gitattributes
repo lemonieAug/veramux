@@ -1,0 +1,11 @@
+# Force LF regardless of the committing platform's line-ending settings.
+# A CRLF shebang line breaks execution on Linux ("bad interpreter"), and
+# Linux is the primary target environment for this repo.
+*.sh text eol=lf
+bin/agent text eol=lf
+tests/fixtures/mock-dsh/dsh text eol=lf
+*.mjs text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf

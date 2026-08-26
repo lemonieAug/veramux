@@ -1,0 +1,41 @@
+# Compatible / tested versions for this stack.
+#
+# These are pins we have verified against, not "latest". Nothing in this repo
+# auto-updates to latest during normal operation (`agent`, `agent doctor`).
+# To move to a newer version deliberately, run `scripts/configure.sh --upgrade`
+# (see README.md "Atualizando versões"), re-run the discovery steps in
+# docs/upstream-findings.md for anything that changed, and update this file.
+
+deepseek_harness:
+  package: "@deepseek-ai/dsh"
+  tested_version: "0.1.1-rc.2"
+  tag: "dsh-v0.1.1-rc.2"
+  repo: "https://github.com/deepseek-ai/deepseek-harness"
+  note: >
+    Developer preview. Upstream warns of compatibility-breaking changes
+    between releases. Re-run discovery (docs/upstream-findings.md) before
+    upgrading.
+
+claude_code:
+  # Pulled in transitively by @deepseek-ai/dsh-subagent-claude-code, which
+  # pins the Claude Agent SDK and its bundled platform CLI. We do not
+  # install or pin a separate host `claude` CLI for this integration.
+  via_bundle: "@deepseek-ai/dsh-subagent-claude-code"
+  agent_sdk_version: "0.3.220"
+  claude_code_cli_version: "2.1.220"
+
+codex:
+  # Pulled in transitively by @deepseek-ai/dsh-subagent-codex, which pins
+  # the official Codex wrapper and its native platform payload. We do not
+  # install or pin a separate host `codex` CLI for this integration.
+  via_bundle: "@deepseek-ai/dsh-subagent-codex"
+  wrapper_version: "0.147.0"
+
+node:
+  minimum: "22.19.0"
+  also_supported: ">=24.0.0"
+  note: "Required by DeepSeek Harness itself (apps/cli engines field)."
+
+pnpm:
+  tested_version: "11.7.0"
+  note: "Required for `dsh plugin --profile <name> add/remove ...`."
