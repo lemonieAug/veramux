@@ -1,0 +1,17 @@
+# Dedicated CODEX_HOME for the reviewer role only (P0.5/P0.10). Contains no
+# secrets and is safe to commit: scripts/configure.sh copies this file into
+# a runtime CODEX_HOME under $DSH_HOME/profiles/reviewer/codex-home/ and
+# symlinks (falling back to copying) auth.json from the user's normal
+# ~/.codex there, so the reviewer authenticates as the user's real Codex
+# login but the sandbox below still applies regardless.
+#
+# Keys confirmed against the real Codex 0.147.0 protocol test fixtures in
+# the deepseek-harness repo (packages/subagent/subagent-codex/tests/) — see
+# docs/upstream-findings.md. Model/model_provider are intentionally left
+# unset so the reviewer uses whatever the user's own Codex login/plan
+# already defaults to.
+
+approval_policy = "never"
+sandbox_mode = "read-only"
+disable_response_storage = true
+check_for_update_on_startup = false

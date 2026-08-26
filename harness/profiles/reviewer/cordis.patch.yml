@@ -1,0 +1,93 @@
+# This profile's own cordis.patch.yml, copied into
+# $DSH_HOME/profiles/reviewer/cordis.patch.yml by scripts/configure.sh
+# (which also substitutes __CODEX_REVIEWER_HOME__ below with the absolute
+# path of the dedicated, read-only-sandboxed CODEX_HOME it prepares — see
+# harness/config/codex-reviewer-home/config.toml), applied after the
+# dsh-base + dsh-headless + dsh-subagent-codex bundle patches (installed
+# with `dsh plugin --profile reviewer add ...`, see scripts/install.sh).
+#
+# Goal: real, mechanism-level read-only enforcement (P0.5/P0.10), not just a
+# prompt instruction. Two independent layers:
+#   1. This profile's own driving model gets NO bash/fs/edit tools at all —
+#      only subagent_codex — so it cannot act on the filesystem itself even
+#      if it wanted to.
+#   2. The Codex child process it delegates to runs under a dedicated
+#      CODEX_HOME whose config.toml pins sandbox_mode = "read-only", so even
+#      Codex's own native tool use cannot write, regardless of the reviewer
+#      prompt or of DSH's own permissionMode.
+
+- id: system-prompt
+  config:
+    persona: |
+      You are a relay, not a reviewer. You have exactly one tool:
+      subagent_codex. On every task you receive, call that tool once with
+      the complete text you were given, unmodified, and wait for its
+      result. When it returns, reply with its final answer verbatim as
+      your own final message: raw text only, no markdown fences, no
+      commentary, no added prose before or after it. Do not call any other
+      tool. You cannot read, write, or edit files yourself, and must not
+      claim to have inspected anything beyond what the task text contains.
+
+# permissionMode "never" means DSH never overrides Codex's sandbox field for
+# this thread (see docs/upstream-findings.md), which is exactly why the
+# dedicated CODEX_HOME's own config.toml is the real enforcement point.
+- id: subagent-codex
+  name: '@deepseek-ai/dsh-subagent-codex'
+  config:
+    providerName: codex-reviewer
+    permissionMode: never
+    env:
+      CODEX_HOME: '__CODEX_REVIEWER_HOME__'
+
+- id: tool-subagent-codex
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: codex-reviewer
+    toolName: subagent_codex
+    backgroundMode: one-shot
+    maxDepth: provider-managed
+
+# Remove dsh-base's generic native tools. Same list as the lead profile;
+# here it is the primary read-only guarantee for this profile's own model,
+# not just belt-and-suspenders.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: tool-ralph
+  disabled: true
+- id: tool-str-replace-editor
+  disabled: true
+- id: tool-web
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-subagent-report
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-todo
+  disabled: true
+
+# Defense in depth at the DSH sandbox layer too, even though this profile's
+# model has no fs/bash tool to exploit it.
+- id: sandbox-policy
+  config:
+    mode: read-only
+    workspaceRoot: !!js process.cwd()

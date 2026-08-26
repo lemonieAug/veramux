@@ -1,0 +1,81 @@
+# This profile's own cordis.patch.yml, copied into
+# $DSH_HOME/profiles/lead/cordis.patch.yml by scripts/configure.sh, applied
+# after the dsh-base + dsh-headless + dsh-subagent-claude-code bundle
+# patches (installed with `dsh plugin --profile lead add ...`, see
+# scripts/install.sh). Row ids below (tool-bash, tool-fs, etc.) are copied
+# from the real dsh-base cordis.patch.yml — see docs/upstream-findings.md.
+#
+# Goal: this profile's own driving model (DeepSeek by default) has exactly
+# one job — relay the task text to the real Claude Code CLI, through the
+# official subagent bundle, and return its answer verbatim. All actual
+# editing happens inside Claude Code's own native, subscription-
+# authenticated session; this profile is given no bash/fs/edit tools of its
+# own, so there is exactly one place implementation work can happen.
+
+- id: system-prompt
+  config:
+    persona: |
+      You are a relay, not an implementer. You have exactly one tool:
+      subagent_claude_code. On every task you receive, call that tool once
+      with the complete task text you were given, unmodified, and wait for
+      its result. When it returns, reply with its final answer verbatim as
+      your own final message: no added commentary, no summarizing, no
+      paraphrasing. Do not call any other tool. You cannot read, write, or
+      edit files yourself, and must not claim to have done so.
+
+# The dormant Claude Code provider from @deepseek-ai/dsh-subagent-claude-code,
+# exposed as exactly one model-facing tool. acceptEdits lets Claude Code's
+# own native permission flow accept file edits non-interactively while still
+# denying anything else that would otherwise require a human prompt (see
+# docs/upstream-findings.md) — this profile never grants bypassPermissions.
+- id: subagent-claude-code
+  name: '@deepseek-ai/dsh-subagent-claude-code'
+  config:
+    providerName: claude-code
+    permissionMode: acceptEdits
+
+- id: tool-subagent-claude-code
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: claude-code
+    toolName: subagent_claude_code
+    backgroundMode: one-shot
+    maxDepth: provider-managed
+
+# Remove dsh-base's generic native tools so this profile's own model cannot
+# bypass Claude Code and act on the filesystem/shell directly. Each id below
+# is copied verbatim from packages/bundle/base/cordis.patch.yml.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: tool-ralph
+  disabled: true
+- id: tool-str-replace-editor
+  disabled: true
+- id: tool-web
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-subagent-report
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-todo
+  disabled: true
