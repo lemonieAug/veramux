@@ -1,0 +1,25 @@
+# Orchestration policy consumed by lib/orchestrate.sh. Small, line-based
+# file we parse ourselves (grep), not general YAML — see policies/safety.yaml
+# for why.
+
+# Hard stop for the Claude -> Codex -> Claude correction loop (P0.8). Applies
+# regardless of remaining findings; the run reports the unresolved finding
+# instead of continuing. Never mask a still-blocking finding as success.
+max_correction_rounds: 2
+
+# P0.9: when review can be skipped entirely (no Codex call, no round spent).
+# All conditions are about the FULL set of changed files.
+skip_review_when:
+  - "no_files_changed"        # git diff is empty
+  - "docs_only"                # every changed path is .md/.mdx/.txt/docs/** (see project_changes_are_docs_only)
+
+# Review is always mandatory when any changed file matches one of these
+# (kept explicit and small per spec P0.9 — no risk classifier in P0).
+always_review_when_path_matches:
+  - "package.json"
+  - "package-lock.json"
+  - "pnpm-lock.yaml"
+  - "requirements.txt"
+  - "pyproject.toml"
+  - "*migration*"
+  - "*schema*"
