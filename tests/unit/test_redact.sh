@@ -2,6 +2,7 @@
 set -uo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SELF_DIR/lib/harness.sh"
+source "$ROOT_DIR/lib/policy.sh"
 source "$ROOT_DIR/lib/redact.sh"
 # lib/redact.sh sets -e for production use; turn it back off for this test file.
 set +e

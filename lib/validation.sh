@@ -20,9 +20,30 @@ validation_node_script() {
 
 # Prints "label<TAB>command" lines, in priority order: test, lint, typecheck,
 # build. Never invents a command that isn't declared by the project itself.
+#
+# A project's .agent/config.yaml (P1.12) may override any of the four
+# labels explicitly; when it defines at least one, those overrides
+# COMPLETELY REPLACE auto-detection (predictable: either the project says
+# exactly what to run, or we detect it — never a partial mix per run).
 validation_detect_commands() {
   local dir="$1" force_build="${2:-false}"
   local emitted=0
+
+  if command -v project_config_validation_command >/dev/null 2>&1; then
+    local label override_cmd any_override=0
+    local -a override_lines=()
+    for label in test lint typecheck build; do
+      override_cmd="$(project_config_validation_command "$dir" "$label")"
+      if [ -n "$override_cmd" ]; then
+        override_lines+=("$label"$'\t'"$override_cmd")
+        any_override=1
+      fi
+    done
+    if [ "$any_override" -eq 1 ]; then
+      printf '%s\n' "${override_lines[@]}"
+      return 0
+    fi
+  fi
 
   if [ -f "$dir/package.json" ]; then
     local test_script lint_script typecheck_script build_script have_test=0 have_typecheck=0

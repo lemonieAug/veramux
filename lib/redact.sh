@@ -4,12 +4,7 @@
 set -euo pipefail
 
 redact_load_patterns() {
-  local safety_file="$1"
-  awk '
-    /^ignore_patterns:/ { flag=1; next }
-    /^[a-zA-Z]/ { flag=0 }
-    flag && /^[[:space:]]*-/ { print }
-  ' "$safety_file" | sed -E 's/^[[:space:]]*-[[:space:]]*"?([^"[:space:]]+)"?[[:space:]]*$/\1/'
+  policy_get_list "$1" ignore_patterns
 }
 
 # Converts our small glob-pattern subset (literal chars + `*`) into one
