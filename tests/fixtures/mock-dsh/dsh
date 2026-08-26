@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Mock `dsh` used by tests/unit/*.sh to exercise bin/agent's orchestration
+# loop deterministically, without a real DeepSeek Harness / Claude Code /
+# Codex install and without spending any quota. Behavior selected by
+# $MOCK_DSH_MODE. This is a test fixture, never referenced from bin/, lib/,
+# or scripts/ — it is not part of the production path.
+set -euo pipefail
+
+profile=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile) profile="$2"; shift 2 ;;
+    --version) echo "dsh/mock 0.0.0-test"; exit 0 ;;
+    *) shift ;;
+  esac
+done
+
+fixed_add() {
+  cat > add.js <<'JS'
+function add(a, b) {
+  if (a < 0 || b < 0) {
+    throw new Error('negative numbers are not allowed');
+  }
+  return a + b;
+}
+module.exports = { add };
+JS
+}
+
+broken_add() {
+  cat > add.js <<'JS'
+function add(a, b) {
+  return a + b;
+}
+module.exports = { add };
+JS
+}
+
+case "${MOCK_DSH_MODE:-}" in
+  happy)
+    if [ "$profile" = "lead" ]; then
+      fixed_add
+      echo "Implemented negative-number validation in add.js."
+    elif [ "$profile" = "reviewer" ]; then
+      echo '{"verdict":"approved","summary":"Matches the objective, tests pass.","findings":[]}'
+    fi
+    ;;
+
+  docs_only)
+    if [ "$profile" = "lead" ]; then
+      echo "# Notes" > NOTES.md
+      echo "Added docs."
+    elif [ "$profile" = "reviewer" ]; then
+      echo '{"verdict":"approved","summary":"n/a","findings":[]}'
+    fi
+    ;;
+
+  changes_then_approve)
+    if [ "$profile" = "lead" ]; then
+      if [ -f .round ]; then
+        fixed_add
+        echo "Applied the reviewer's requested fix."
+      else
+        : > .round
+        broken_add
+        echo "Initial (incomplete) implementation."
+      fi
+    elif [ "$profile" = "reviewer" ]; then
+      if [ -f .reviewed ]; then
+        echo '{"verdict":"approved","summary":"Fixed.","findings":[]}'
+      else
+        : > .reviewed
+        echo '{"verdict":"changes_requested","summary":"Missing validation.","findings":[{"severity":"high","category":"correctness","file":"add.js","line":1,"problem":"No negative-number check","reason":"Task requires rejecting negative inputs","recommendation":"Add a guard clause that throws on negative a or b"}]}'
+      fi
+    fi
+    ;;
+
+  invalid_json_once)
+    if [ "$profile" = "lead" ]; then
+      fixed_add
+      echo "Implemented."
+    elif [ "$profile" = "reviewer" ]; then
+      if [ -f .retried ]; then
+        echo '{"verdict":"approved","summary":"ok","findings":[]}'
+      else
+        : > .retried
+        echo 'not valid json at all'
+      fi
+    fi
+    ;;
+
+  invalid_json_twice)
+    if [ "$profile" = "lead" ]; then
+      fixed_add
+      echo "Implemented."
+    elif [ "$profile" = "reviewer" ]; then
+      echo 'still not valid json'
+    fi
+    ;;
+
+  never_approves)
+    if [ "$profile" = "lead" ]; then
+      broken_add
+      echo "attempt"
+    elif [ "$profile" = "reviewer" ]; then
+      echo '{"verdict":"changes_requested","summary":"still broken","findings":[{"severity":"critical","category":"correctness","file":"add.js","line":1,"problem":"still no negative check","reason":"task requirement","recommendation":"add the guard"}]}'
+    fi
+    ;;
+
+  lead_unreachable)
+    echo "simulated lead outage" >&2
+    exit 1
+    ;;
+
+  reviewer_unreachable)
+    if [ "$profile" = "lead" ]; then
+      fixed_add
+      echo "Implemented."
+    else
+      echo "simulated reviewer outage" >&2
+      exit 1
+    fi
+    ;;
+
+  *)
+    echo "mock-dsh: unknown MOCK_DSH_MODE='${MOCK_DSH_MODE:-}'" >&2
+    exit 1
+    ;;
+esac

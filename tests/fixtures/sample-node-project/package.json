@@ -1,0 +1,9 @@
+{
+  "name": "sample-node-project",
+  "version": "1.0.0",
+  "private": true,
+  "description": "P0.15 smoke-test fixture. Not a real project.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
