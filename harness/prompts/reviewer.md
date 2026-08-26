@@ -20,6 +20,17 @@ Do not flag: purely aesthetic or stylistic preferences, cosmetic changes
 with no behavioral impact, optional refactors, or subjective opinions with
 no concrete, demonstrable consequence.
 
+## Risk classification
+
+{{RISK}}
+
+This was classified by path/diff pattern, not by you — treat it as a
+starting signal, not a ceiling: raise your own severity if you find
+something worse than the classification implies. A HIGH classification
+means this touches a sensitive area (auth, secrets, payments, migrations,
+sandboxing, process execution, or similar) — scrutinize accordingly
+regardless of how small the diff looks.
+
 ## Objective
 
 {{OBJECTIVE}}
@@ -31,6 +42,10 @@ no concrete, demonstrable consequence.
 ## Affected files
 
 {{FILES}}
+
+## Architectural context
+
+{{ARCHITECTURE}}
 
 ## Diff
 

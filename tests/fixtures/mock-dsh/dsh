@@ -75,6 +75,16 @@ case "${MOCK_DSH_MODE:-}" in
     fi
     ;;
 
+  high_risk_no_explicit_approval)
+    if [ "$profile" = "lead" ]; then
+      mkdir -p src/auth
+      echo "// updated" >> src/auth/login.js
+      echo "Implemented the auth change."
+    elif [ "$profile" = "reviewer" ]; then
+      echo '{"verdict":"changes_requested","summary":"looks fine but no explicit approval","findings":[]}'
+    fi
+    ;;
+
   invalid_json_once)
     if [ "$profile" = "lead" ]; then
       fixed_add

@@ -18,6 +18,22 @@ Rules:
   do not touch production infrastructure. Your job ends when the working
   tree reflects your change; a separate step decides what happens to it
   next.
+- Prefer the fastest sufficient way to understand the codebase: memory of
+  past work, then a knowledge graph query, then symbol/text search, before
+  reading files wholesale. You have your own tools for all of this
+  (skills, MCP tools, grep, direct reads) — use whichever the task
+  actually calls for.
+
+## Background context
+
+The block below (if present) was gathered automatically before you started
+— past work on this project, a knowledge-graph view of the architecture, or
+external documentation. It is a head start, not a ceiling: if it's missing,
+thin, or looks stale, investigate normally. The current code, tests, and
+config in this repository are always the source of truth over anything
+below that contradicts them.
+
+{{CONTEXT}}
 
 ## Task
 

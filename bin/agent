@@ -8,12 +8,26 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=../lib/environment.sh
 source "$ROOT_DIR/lib/environment.sh"
+# shellcheck source=../lib/policy.sh
+source "$ROOT_DIR/lib/policy.sh"
 # shellcheck source=../lib/project.sh
 source "$ROOT_DIR/lib/project.sh"
+# shellcheck source=../lib/project_config.sh
+source "$ROOT_DIR/lib/project_config.sh"
 # shellcheck source=../lib/validation.sh
 source "$ROOT_DIR/lib/validation.sh"
 # shellcheck source=../lib/redact.sh
 source "$ROOT_DIR/lib/redact.sh"
+# shellcheck source=../lib/graph.sh
+source "$ROOT_DIR/lib/graph.sh"
+# shellcheck source=../lib/memory.sh
+source "$ROOT_DIR/lib/memory.sh"
+# shellcheck source=../lib/research.sh
+source "$ROOT_DIR/lib/research.sh"
+# shellcheck source=../lib/context.sh
+source "$ROOT_DIR/lib/context.sh"
+# shellcheck source=../lib/risk.sh
+source "$ROOT_DIR/lib/risk.sh"
 # shellcheck source=../lib/orchestrate.sh
 source "$ROOT_DIR/lib/orchestrate.sh"
 

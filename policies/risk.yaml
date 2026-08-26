@@ -1,0 +1,82 @@
+# Deterministic risk classification (P1.9). Small, line-based file we parse
+# ourselves (grep/awk) — see policies/safety.yaml for why. A project's
+# .agent/config.yaml (P1.12) can append to high_risk_paths; it can never
+# remove one of these, and HIGH always wins over "the diff is tiny" — see
+# lib/risk.sh.
+
+# Any changed path matching one of these makes the whole change HIGH,
+# regardless of diff size (a one-line change to auth middleware stays HIGH).
+high_risk_paths:
+  - "*auth*"
+  - "*session*"
+  - "*password*"
+  - "*permission*"
+  - "*crypto*"
+  - "*secret*"
+  - "*credential*"
+  - "*payment*"
+  - "*billing*"
+  - "*/migrations/**"
+  - "*migration*"
+  - "*schema*"
+  - "package.json"
+  - "package-lock.json"
+  - "pnpm-lock.yaml"
+  - "yarn.lock"
+  - "requirements.txt"
+  - "Pipfile.lock"
+  - "poetry.lock"
+  - "go.sum"
+  - "Cargo.lock"
+  - "*sandbox*"
+  - "Dockerfile"
+  - "docker-compose*.yml"
+  - "*/.github/workflows/**"
+  - "*.pem"
+  - "*.key"
+
+# A diff whose added/removed lines contain one of these substrings is HIGH,
+# regardless of which file it's in (concurrency/shell/process-execution and
+# destructive-SQL signals the path-pattern list can't catch by name alone).
+high_risk_diff_keywords:
+  - "child_process"
+  - "subprocess"
+  - "os.system"
+  - "exec("
+  - "eval("
+  - "sudo "
+  - "chmod "
+  - "rm -rf"
+  - "DROP TABLE"
+  - "ALTER TABLE"
+  - "Mutex"
+  - "threading."
+  - "async fn"
+  - "unsafe "
+
+# When every changed path matches one of these AND no high-risk signal
+# fired, the change is LOW (skip Codex by default — see
+# policies/orchestration.yaml skip_review_when, which this extends).
+low_risk_paths:
+  - "*.md"
+  - "*.mdx"
+  - "*.txt"
+  - "docs/**"
+  - "LICENSE"
+  - "CHANGELOG*"
+  - ".gitignore"
+  - "*.gitignore"
+
+# review.<tier>.codex / .verification map onto lib/orchestrate.sh's
+# behavior — see P1.10. "codex: false" means skip Codex entirely for that
+# tier; "verification: true" means run one extra Codex pass after a
+# correction round even if the finding count would otherwise end the loop.
+review:
+  low:
+    codex: false
+  medium:
+    codex: true
+    verification: false
+  high:
+    codex: true
+    verification: true

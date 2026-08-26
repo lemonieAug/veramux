@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# The deterministic Claude -> validate -> Codex -> correct loop (P0.7/P0.8).
+# The deterministic Claude -> validate -> Codex -> correct loop (P0.7/P0.8),
+# extended in P1 with automatic context gathering (lib/context.sh) and
+# risk-adaptive review depth (lib/risk.sh, P1.9/P1.10).
 # Sourced by bin/agent. Must not be executed directly.
 set -euo pipefail
 
@@ -42,6 +44,17 @@ orchestrate_run_validation() {
   fi
 }
 
+# One short line per tier, shown to the reviewer so it knows what triggered
+# the classification without us re-deriving it in prose each time.
+orchestrate_risk_description() {
+  case "$1" in
+    high) echo "HIGH — a changed path or diff line matched a sensitive pattern (auth, secrets, payments, migrations, sandboxing, process execution, or similar). Scrutinize regardless of diff size." ;;
+    medium) echo "MEDIUM — an ordinary application-logic change. Standard review depth." ;;
+    low) echo "LOW — every changed path matches a low-risk pattern (docs, formatting, etc.). Review was requested anyway (project override)." ;;
+    *) echo "$1" ;;
+  esac
+}
+
 # orchestrate_run <workspace> <task-text>
 # Prints progress and the lead's final answer to stdout as it happens.
 # Returns 0 when the loop reaches an approved/non-blocking end state, 1
@@ -59,8 +72,18 @@ orchestrate_run() {
   printf '%s' "$task" > "$run_dir/task.txt"
 
   echo
+  echo "== Step 0/6: gathering context (memory / graph / research) =="
+  context_build "$workspace" "$task" "$run_dir/context.md"
+  if [ ! -s "$run_dir/context.md" ]; then
+    echo "(no automatic context was gathered — investigate normally.)" > "$run_dir/context.md"
+  fi
+
+  echo
   echo "== Step 1/6: Claude Code implements =="
-  orchestrate_render "$_ORCH_ROOT_DIR/harness/prompts/lead.md" "TASK=$run_dir/task.txt" > "$run_dir/lead-message.txt"
+  orchestrate_render "$_ORCH_ROOT_DIR/harness/prompts/lead.md" \
+    "TASK=$run_dir/task.txt" \
+    "CONTEXT=$run_dir/context.md" \
+    > "$run_dir/lead-message.txt"
   local lead_answer
   if ! lead_answer="$(orchestrate_call_dsh "$workspace" lead "$run_dir/lead-message.txt")"; then
     echo "FINAL RESULT: error — could not reach the lead (Claude Code) profile." >&2
@@ -89,11 +112,34 @@ orchestrate_run() {
   orchestrate_json validation-summary "$validation_json"
   echo
 
-  if project_changes_are_docs_only "$workspace"; then
+  local -a extra_high_paths
+  mapfile -t extra_high_paths < <(project_config_extra_high_risk_paths "$workspace")
+  local risk_tier
+  risk_tier="$(risk_classify "$workspace" "${extra_high_paths[@]}")"
+  echo "risk classification: $risk_tier"
+
+  local force_review=0
+  project_config_always_review "$workspace" && force_review=1
+
+  if [ "$risk_tier" = "low" ] && [ "$force_review" -eq 0 ] && ! risk_requires_codex low; then
     echo
-    echo "FINAL RESULT: only documentation changed — skipping Codex review per policy."
+    echo "FINAL RESULT: low risk change — skipping Codex review per policy (policies/risk.yaml)."
     return 0
   fi
+
+  local require_strict_approval=0
+  risk_requires_verification "$risk_tier" && require_strict_approval=1
+
+  orchestrate_risk_description "$risk_tier" > "$run_dir/risk.txt"
+  : > "$run_dir/architecture.txt"
+  if [ "$risk_tier" = "high" ]; then
+    local arch_max
+    arch_max="$(policy_get "$_ORCH_ROOT_DIR/policies/context.yaml" graph max_chars 8000)"
+    if context_graph_enabled "$workspace" && graph_is_ready "$workspace"; then
+      graph_query "$workspace" "$task" "$arch_max" > "$run_dir/architecture.txt" 2>/dev/null || true
+    fi
+  fi
+  [ -s "$run_dir/architecture.txt" ] || echo "(none — not needed for this risk level, or no graph available)" > "$run_dir/architecture.txt"
 
   local round=0
   while :; do
@@ -113,6 +159,8 @@ orchestrate_run() {
       "VALIDATION_SUMMARY=$run_dir/validation-summary.txt" \
       "FILES=$run_dir/files.txt" \
       "DIFF=$run_dir/diff.txt" \
+      "RISK=$run_dir/risk.txt" \
+      "ARCHITECTURE=$run_dir/architecture.txt" \
       > "$run_dir/reviewer-message-$round.txt"
 
     local review_file="$run_dir/review-$round.json"
@@ -153,7 +201,15 @@ orchestrate_run() {
 
     if [ "$verdict" = "approved" ] || [ "$blocking_count" -eq 0 ]; then
       echo
-      echo "FINAL RESULT: approved (round $round)."
+      if [ "$require_strict_approval" -eq 1 ] && [ "$verdict" != "approved" ]; then
+        # HIGH risk (policies/risk.yaml review.high.verification): note the
+        # nuance instead of silently equating "nothing blocking" with an
+        # explicit approval — but still end the loop, since there is
+        # nothing actionable left to send back for correction.
+        echo "FINAL RESULT: approved (round $round) — HIGH risk: Codex did not use the word \"approved\", but reported no blocking finding after review; nothing actionable remains to correct."
+      else
+        echo "FINAL RESULT: approved (round $round)$([ "$require_strict_approval" -eq 1 ] && echo ", verified")."
+      fi
       return 0
     fi
 
