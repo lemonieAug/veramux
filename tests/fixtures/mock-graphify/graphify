@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Mock `graphify` CLI for tests/unit/test_graph.sh. Not part of the
+# production path.
+set -euo pipefail
+case "${1:-}" in
+  install) mkdir -p .claude/skills/graphify; echo "SKILL" > .claude/skills/graphify/SKILL.md ;;
+  extract) mkdir -p graphify-out; echo '{"nodes":[],"edges":[]}' > graphify-out/graph.json ;;
+  query) echo "MOCK QUERY RESULT for: ${2:-}" ;;
+  explain) echo "MOCK EXPLAIN for: ${2:-}" ;;
+  --version) echo "graphify/mock 0.0.0-test" ;;
+  *) echo "mock-graphify: unhandled args: $*" >&2; exit 1 ;;
+esac

@@ -88,3 +88,33 @@ use_mock_dsh() {
 run_agent() {
   bash "$ROOT_DIR/bin/agent" "$@"
 }
+
+# Prepends the mock graphify to PATH for the current shell.
+use_mock_graphify() {
+  export PATH="$TESTS_DIR/fixtures/mock-graphify:$PATH"
+}
+
+# Starts the mock claude-mem worker on a free-ish port, exports
+# CLAUDE_MEM_WORKER_PORT so lib/memory.sh finds it, and waits briefly for it
+# to come up. Caller must call stop_mock_memory_server in a trap/cleanup.
+MOCK_MEMORY_SERVER_PID=""
+start_mock_memory_server() {
+  local port="${1:-37799}"
+  if ! command -v node >/dev/null 2>&1; then
+    return 1
+  fi
+  node "$TESTS_DIR/fixtures/mock-memory-server.mjs" "$port" >/tmp/mock-memory-server.log 2>&1 &
+  MOCK_MEMORY_SERVER_PID=$!
+  export CLAUDE_MEM_WORKER_PORT="$port"
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    curl -sf --max-time 1 "http://127.0.0.1:$port/api/health" >/dev/null 2>&1 && return 0
+    sleep 0.3
+  done
+  return 1
+}
+
+stop_mock_memory_server() {
+  [ -n "$MOCK_MEMORY_SERVER_PID" ] && kill "$MOCK_MEMORY_SERVER_PID" >/dev/null 2>&1
+  MOCK_MEMORY_SERVER_PID=""
+}
