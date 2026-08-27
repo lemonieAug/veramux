@@ -65,4 +65,17 @@ DSH_HOME="$FAKE_HOME_LEAK" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doct
 assert_eq "2" "$code" "doctor treats a hardcoded API key as blocking"
 assert_contains "$(cat /tmp/doctor3.out)" "ANTHROPIC_API_KEY" "doctor names which credential leaked"
 
+# --- P2.14/P2.18: corrupt run journal detection ---
+CORRUPT_STATE="$TMP/corrupt-state"
+mkdir -p "$CORRUPT_STATE/runs/some-project/20260101T000000Z-abcdef"
+echo '{ this is not valid json' > "$CORRUPT_STATE/runs/some-project/20260101T000000Z-abcdef/run.json"
+out_corrupt="$(AGENT_STATE_HOME="$CORRUPT_STATE" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_corrupt" "corrupt run.json file(s) detected" "doctor detects a corrupt run journal"
+
+CLEAN_STATE="$TMP/clean-state"
+mkdir -p "$CLEAN_STATE/runs/some-project/20260101T000000Z-abcdef"
+echo '{"schema_version":1,"state":"COMPLETED"}' > "$CLEAN_STATE/runs/some-project/20260101T000000Z-abcdef/run.json"
+out_clean="$(AGENT_STATE_HOME="$CLEAN_STATE" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_clean" "no corrupt run journal detected" "doctor reports clean journals as clean, not a false positive"
+
 report_and_exit

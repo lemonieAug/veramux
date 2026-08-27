@@ -117,6 +117,54 @@ case "${MOCK_DSH_MODE:-}" in
     fi
     ;;
 
+  resume_correction_fix)
+    # P2.10 resume test fixture: simulates "Claude fixes it during a
+    # RESUMED correction call, then Codex approves" — deliberately
+    # stateless (no .round/.reviewed markers) since a resume test fabricates
+    # the pre-interruption state directly rather than replaying earlier
+    # calls through this mock.
+    if [ "$profile" = "lead" ]; then
+      fixed_add
+      echo "Applied the fix during resumed correction."
+    elif [ "$profile" = "reviewer" ]; then
+      echo '{"verdict":"approved","summary":"Fixed after resumed correction.","findings":[]}'
+    fi
+    ;;
+
+  quota_unavailable)
+    # P2.19 Scenario C: Codex has no quota. Lead succeeds normally; the
+    # reviewer call fails with a quota-shaped message on stderr and a
+    # nonzero exit — review must NOT become "approved" as a result.
+    if [ "$profile" = "lead" ]; then
+      fixed_add
+      echo "Implemented."
+    elif [ "$profile" = "reviewer" ]; then
+      echo "Error: insufficient_quota — Codex usage limit reached for this billing period." >&2
+      exit 1
+    fi
+    ;;
+
+  auth_failure)
+    # P2.19: Claude's own auth/session is invalid. Exit nonzero with an
+    # authentication-shaped stderr message.
+    if [ "$profile" = "lead" ]; then
+      echo "Error: Unauthorized (401) — please log in again." >&2
+      exit 1
+    elif [ "$profile" = "reviewer" ]; then
+      echo '{"verdict":"approved","summary":"n/a","findings":[]}'
+    fi
+    ;;
+
+  hang)
+    # P2.19 Scenario B: the child never returns on its own — proves our
+    # OWN wall-clock timeout (lib/proc_timeout.sh), not dsh, is what ends
+    # it, and that nothing is left running afterward (no orphan process).
+    if [ -n "${HANG_PID_FILE:-}" ]; then
+      echo "$$" > "$HANG_PID_FILE"
+    fi
+    sleep 999999
+    ;;
+
   lead_unreachable)
     echo "simulated lead outage" >&2
     exit 1

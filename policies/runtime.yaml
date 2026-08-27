@@ -1,0 +1,55 @@
+# P2 operational-hardening policy: timeouts, retries, run persistence/
+# locking/retention, recovery, and version-drift detection. Small,
+# line-based file parsed by lib/policy.sh — see policies/safety.yaml for
+# why we don't use a general YAML parser.
+#
+# The correction-round limit is NOT duplicated here — it already lives in
+# policies/orchestration.yaml's top-level `max_correction_rounds` (P0), and
+# stays there; lib/orchestrate.sh's orchestrate_max_rounds reads it. Two
+# files claiming to own the same number would be a real footgun.
+
+# Wall-clock deadlines per call category (seconds). DSH itself imposes none
+# of these (see docs/upstream-findings.md P2 section) — lib/proc_timeout.sh
+# enforces them by wrapping the `dsh` process. `claude`/`codex` map onto the
+# lead/reviewer profile calls respectively.
+timeouts:
+  context: 120
+  validation: 600
+  claude: 900
+  codex: 600
+  research: 120
+
+# Grace period (seconds) between our own SIGTERM and SIGKILL — kept a bit
+# longer than the subagent providers' own disposeGraceMs (3000ms default,
+# see upstream-findings.md) so DSH's own escalation ladder finishes first.
+timeout_grace_seconds: 10
+
+# P2.9: retries must stay rare and specific. max_attempts includes the
+# first attempt (1 = no retry). See lib/failures.sh failure_is_retryable
+# for the fixed, small set of categories these numbers ever apply to.
+retry:
+  transient_max_attempts: 2
+  malformed_review_max_attempts: 1
+
+# P2.5/P2.12/P2.17
+runs:
+  persistence: true
+  locking_enabled: true
+  retention_days: 30
+  retention_max_per_project: 100
+
+# P2.10/P2.13
+recovery:
+  enabled: true
+  require_git_state_validation: true
+
+# P2.15
+versions:
+  detect_drift: true
+  auto_update: false
+
+# P2.6
+logging:
+  structured: true
+  redact_secrets: true
+  persist_model_hidden_reasoning: false

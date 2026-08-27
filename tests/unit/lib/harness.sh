@@ -16,6 +16,16 @@ ROOT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 PASS_COUNT=0
 FAIL_COUNT=0
 
+# P2: every test file gets its own isolated run-journal/lock state dir, so
+# `run_agent`/orchestrate.sh calls in tests never touch the real machine's
+# ~/.local/state/agent-stack and never collide with a concurrently-running
+# test suite. Individual test files that exercise lib/state_paths.sh etc.
+# directly are free to override this with their own AGENT_STATE_HOME.
+if [ -z "${AGENT_STATE_HOME:-}" ]; then
+  AGENT_STATE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-test-state.XXXXXX")"
+  export AGENT_STATE_HOME
+fi
+
 assert_eq() {
   local expected="$1" actual="$2" msg="${3:-}"
   if [ "$expected" = "$actual" ]; then

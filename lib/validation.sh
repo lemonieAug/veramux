@@ -5,6 +5,20 @@ set -euo pipefail
 
 _VALIDATION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# validation_pm_cmd <pm> <label>
+# Delegates to lib/project_detect.sh's project_pm_command when that module
+# is sourced; falls back to plain npm otherwise (this file is also used
+# standalone by some tests/tools that don't need package-manager awareness).
+validation_pm_cmd() {
+  if command -v project_pm_command >/dev/null 2>&1; then
+    project_pm_command "$1" "$2"
+  elif [ "$2" = "test" ]; then
+    echo "npm test"
+  else
+    echo "npm run $2"
+  fi
+}
+
 validation_node_script() {
   local dir="$1" name="$2"
   node -e '
@@ -46,28 +60,37 @@ validation_detect_commands() {
   fi
 
   if [ -f "$dir/package.json" ]; then
+    # P2.2/P2.3: the command prefix follows the PROJECT's own lockfile, not
+    # whichever package manager happens to be on this machine. Falls back to
+    # npm when lib/project_detect.sh isn't sourced (some callers/tests use
+    # this file standalone).
+    local pm="npm"
+    if command -v project_pm_resolve >/dev/null 2>&1; then
+      pm="$(project_pm_resolve "$dir" 2>/dev/null || echo npm)"
+    fi
+
     local test_script lint_script typecheck_script build_script have_test=0 have_typecheck=0
     test_script="$(validation_node_script "$dir" test)"
     if [ -n "$test_script" ] && [ "$test_script" != 'echo "Error: no test specified" && exit 1' ]; then
-      printf 'test\tnpm test\n'
+      printf 'test\t%s\n' "$(validation_pm_cmd "$pm" test)"
       have_test=1
       emitted=1
     fi
     lint_script="$(validation_node_script "$dir" lint)"
     if [ -n "$lint_script" ]; then
-      printf 'lint\tnpm run lint\n'
+      printf 'lint\t%s\n' "$(validation_pm_cmd "$pm" lint)"
       emitted=1
     fi
     typecheck_script="$(validation_node_script "$dir" typecheck)"
     if [ -n "$typecheck_script" ]; then
-      printf 'typecheck\tnpm run typecheck\n'
+      printf 'typecheck\t%s\n' "$(validation_pm_cmd "$pm" typecheck)"
       have_typecheck=1
       emitted=1
     fi
     build_script="$(validation_node_script "$dir" build)"
     if [ -n "$build_script" ]; then
       if [ "$force_build" = "true" ] || { [ "$have_test" -eq 0 ] && [ "$have_typecheck" -eq 0 ]; }; then
-        printf 'build\tnpm run build\n'
+        printf 'build\t%s\n' "$(validation_pm_cmd "$pm" build)"
         emitted=1
       fi
     fi

@@ -16,6 +16,8 @@ source "$ROOT_DIR/lib/project.sh"
 source "$ROOT_DIR/lib/project_config.sh"
 # shellcheck source=../lib/validation.sh
 source "$ROOT_DIR/lib/validation.sh"
+# shellcheck source=../lib/project_detect.sh
+source "$ROOT_DIR/lib/project_detect.sh"
 # shellcheck source=../lib/redact.sh
 source "$ROOT_DIR/lib/redact.sh"
 # shellcheck source=../lib/graph.sh
@@ -28,8 +30,32 @@ source "$ROOT_DIR/lib/research.sh"
 source "$ROOT_DIR/lib/context.sh"
 # shellcheck source=../lib/risk.sh
 source "$ROOT_DIR/lib/risk.sh"
+# shellcheck source=../lib/state_paths.sh
+source "$ROOT_DIR/lib/state_paths.sh"
+# shellcheck source=../lib/run_lifecycle.sh
+source "$ROOT_DIR/lib/run_lifecycle.sh"
+# shellcheck source=../lib/journal.sh
+source "$ROOT_DIR/lib/journal.sh"
+# shellcheck source=../lib/failures.sh
+source "$ROOT_DIR/lib/failures.sh"
+# shellcheck source=../lib/proc_timeout.sh
+source "$ROOT_DIR/lib/proc_timeout.sh"
+# shellcheck source=../lib/retry.sh
+source "$ROOT_DIR/lib/retry.sh"
+# shellcheck source=../lib/workspace_lock.sh
+source "$ROOT_DIR/lib/workspace_lock.sh"
+# shellcheck source=../lib/git_safety.sh
+source "$ROOT_DIR/lib/git_safety.sh"
+# shellcheck source=../lib/run_cli.sh
+source "$ROOT_DIR/lib/run_cli.sh"
+# shellcheck source=../lib/cleanup.sh
+source "$ROOT_DIR/lib/cleanup.sh"
+# shellcheck source=../lib/version_drift.sh
+source "$ROOT_DIR/lib/version_drift.sh"
 # shellcheck source=../lib/orchestrate.sh
 source "$ROOT_DIR/lib/orchestrate.sh"
+# shellcheck source=../lib/resume.sh
+source "$ROOT_DIR/lib/resume.sh"
 
 agent_version() {
   grep 'tested_version:' "$ROOT_DIR/versions.yaml" | head -1 | sed -E 's/.*"([^"]+)".*/\1/'
@@ -47,6 +73,19 @@ Usage:
   agent doctor [/path]         Run environment/setup checks (see README)
   agent --help                 Show this message
   agent --version              Show this stack's tested version pins
+
+Operational commands (P2 — never call an LLM):
+  agent status [/path]         Project, active run, lock, provider status
+  agent runs [/path]           List recorded runs for a project
+  agent show <run-id>          Sanitized summary of one run
+  agent logs <run-id> [--json] Structured events for one run
+  agent resume <run-id> [--force]
+                                Resume an interrupted run at its last safe
+                                checkpoint (never continues a Claude/Codex
+                                session directly — see README "Recovery")
+  agent cancel <run-id>        Request cancellation of an active run
+  agent unlock [/path]         Force-remove a workspace lock (see doctor first)
+  agent cleanup [/path]        Apply run retention (policies/runtime.yaml)
 
 If no task text is given, agent reads one line from stdin when input is
 piped, or prompts interactively when attached to a terminal.
@@ -84,6 +123,63 @@ main() {
     doctor)
       shift
       exec "$ROOT_DIR/scripts/doctor.sh" "$@"
+      ;;
+    status)
+      shift
+      local ws
+      ws="$(project_resolve_workspace "${1:-.}")" || exit 1
+      run_cli_status "$ws"
+      exit 0
+      ;;
+    runs)
+      shift
+      local ws
+      ws="$(project_resolve_workspace "${1:-.}")" || exit 1
+      run_cli_runs "$ws"
+      exit 0
+      ;;
+    show)
+      shift
+      if [ -z "${1:-}" ]; then echo "usage: agent show <run-id>" >&2; exit 1; fi
+      run_cli_show "$1"
+      exit $?
+      ;;
+    logs)
+      shift
+      if [ -z "${1:-}" ]; then echo "usage: agent logs <run-id> [--json]" >&2; exit 1; fi
+      run_cli_logs "$1" "${2:-}"
+      exit $?
+      ;;
+    resume)
+      shift
+      if [ -z "${1:-}" ]; then echo "usage: agent resume <run-id> [--force]" >&2; exit 1; fi
+      local rid="$1" force=false
+      shift
+      [ "${1:-}" = "--force" ] && force=true
+      resume_run "$rid" "$force"
+      exit $?
+      ;;
+    cancel)
+      shift
+      if [ -z "${1:-}" ]; then echo "usage: agent cancel <run-id>" >&2; exit 1; fi
+      run_cli_cancel "$1"
+      exit $?
+      ;;
+    unlock)
+      shift
+      local ws
+      ws="$(project_resolve_workspace "${1:-.}")" || exit 1
+      run_cli_unlock "$ws"
+      exit 0
+      ;;
+    cleanup)
+      shift
+      local ws=""
+      if [ -n "${1:-}" ]; then
+        ws="$(project_resolve_workspace "$1")" || exit 1
+      fi
+      cleanup_apply_retention "$ws"
+      exit 0
       ;;
   esac
 

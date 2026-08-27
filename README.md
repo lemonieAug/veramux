@@ -6,29 +6,36 @@ in charge of running Claude Code as the implementer and Codex as an
 independent, mechanism-enforced read-only reviewer against your own
 projects.
 
-P0 was the minimum end-to-end loop; P1 (this version) adds automatic
-context gathering (memory, code-structure graph, external research — all
-optional, all degrading gracefully) and risk-adaptive review depth on top
-of it, without changing P0's core guarantees. A dashboard, multi-user/SaaS,
-Kubernetes, a remote database, a custom UI, a generic plugin system, a
-required local model, and a custom embeddings/vector-DB stack are
-explicitly out of scope — see [Future scope (P2+)](#future-scope-p2) at the
-bottom.
+P0 was the minimum end-to-end loop; P1 added automatic context gathering
+(memory, code-structure graph, external research — all optional, all
+degrading gracefully) and risk-adaptive review depth. P2 (this version) is
+operational hardening, not a new agent layer: a durable run journal,
+structured events, a small run-state machine, timeouts/retries/
+cancellation, workspace locking, git-state safety, and recovery/resume —
+so `agent .` is something you can run daily and trust, without changing
+any of P0/P1's core guarantees. See
+[Operational hardening (P2)](#operational-hardening-p2) below. A
+dashboard, multi-user/SaaS, Kubernetes, a remote database, a custom UI, a
+generic plugin system, a required local model, and a custom embeddings/
+vector-DB stack remain explicitly out of scope — see
+[Future scope (P3+)](#future-scope-p3) at the bottom.
 
 ## Architecture
 
 ```
 User
   |
+run journal created (run_id, lock acquired) -- P2.4/P2.5/P2.12
+  |
 DeepSeek Harness (orchestrator: dsh)
   |
-Context gathering (memory / graph / grep / external research — all optional)
+Context gathering (memory / graph / grep / external research -- all optional)
   |
 Claude Code (lead, real write/edit access, subscription-authenticated)
   |
 Tests / Lint / Typecheck (the project's own commands)
   |
-Risk classification (low / medium / high — deterministic, no LLM call)
+Risk classification (low / medium / high -- deterministic, no LLM call)
   |
 Codex (independent reviewer, mechanism-enforced read-only; skipped for low risk)
   |
@@ -36,7 +43,29 @@ Claude Code (correction, up to policies/orchestration.yaml: max_correction_round
   |
 Final validation
   |
-Final result (approved | blocked, never silently masked)
+Final result (approved | blocked, never silently masked) -- journal COMPLETED/FAILED
+```
+
+Every arrow above is wrapped with a wall-clock timeout, a structured event,
+and (for the two dsh calls) a bounded retry on transient failure only —
+see [Operational hardening (P2)](#operational-hardening-p2). An
+interrupted run (Ctrl+C, a VPS reboot, a killed process) leaves a durable
+record instead of silent, mysterious state:
+
+```
+INTERRUPTED
+  |
+run journal (what phase were we in? was that phase's call actually
+             in flight, or just about to start?)
+  |
+git state check (has HEAD moved since this run started?)
+  |
+safe checkpoint (CONTEXT_READY / IMPLEMENTATION_DONE / VALIDATION_DONE /
+                 REVIEW_DONE / CORRECTION_DONE)
+  |
+a NEW, self-contained one-shot call to Claude/Codex if one is needed
+  |
+CONTINUE (agent resume <run-id>)
 ```
 
 DeepSeek Harness (`dsh`) is real, but very new (developer preview,
@@ -430,6 +459,214 @@ invocation and correction-round counts, and the final validation summary.
 See the honest limitation on what this can and can't measure in
 [Known limitations](#known-limitations).
 
+## Operational hardening (P2)
+
+P2's goal: run `agent .` daily and trust it. This section covers what got
+added and how to use it. None of it adds an LLM call to a normal run — see
+[Token/LLM-call impact](#tokenllm-call-impact-p2) at the end of this
+section.
+
+### Project detection and the validation profile (P2.2/P2.3)
+
+At the start of every run the stack builds a small **validation profile**
+for the workspace — deterministically, from evidence on disk only (a
+manifest or lockfile's presence, never "what's installed on this box" or a
+content heuristic):
+
+- **languages** — node/python/make (P0) plus go, rust, php, java, docker, just
+- **package manager** — chosen from the project's *own* lockfile
+  (`pnpm-lock.yaml` -> pnpm, `yarn.lock` -> yarn, `bun.lock*` -> bun, else npm);
+  genuine ambiguity (two lockfiles) warns and falls back to npm. Override
+  with `validation.package_manager` in `.agent/config.yaml`.
+- **validation commands** — `test` / `lint` / `typecheck` / `build`, already
+  prefixed for the resolved package manager (e.g. `pnpm test`, `yarn lint`)
+- **frameworks** — only when a single manifest field answers it (next, nuxt)
+- **source_files_that_justify_detection** — the exact files that drove each call
+
+It is persisted to `<run-dir>/project-profile.json` (mode 600), cached
+project-level for reuse across runs, and its metadata (never file contents)
+is recorded as the `project.detected` event. `agent show <run-id>`
+surfaces it.
+
+### Run lifecycle and the run journal
+
+Every real task gets a `run_id` (`<UTC timestamp>-<6 hex chars>`, e.g.
+`20260826T204512Z-a1b2c3`) and a small state machine:
+
+```
+CREATED -> CONTEXT -> IMPLEMENTING -> VALIDATING -> REVIEWING
+  -> (CORRECTING -> VALIDATING -> REVIEWING)*  -> COMPLETED
+  any non-terminal state -> FAILED | CANCELLED | INTERRUPTED
+```
+
+State is persisted durably under an XDG-style state directory — **never
+inside your project's own repo**:
+
+```
+${XDG_STATE_HOME:-~/.local/state}/agent-stack/
+  runs/<project-id>/<run-id>/
+    run.json          # schema_version, state, timestamps, git heads, risk...
+    events.jsonl       # one structured JSON line per operational event
+    task.txt           # the full task text (mode 600) — run.json only
+                        # keeps a truncated one-line task_summary
+    validation.json, review-N.json, final.json, ...
+  locks/<project-id>.lock.d/
+```
+
+Override the root with `AGENT_STATE_HOME` (mainly for tests). `run.json`
+never contains API keys, tokens, or hidden model reasoning — writing a
+field whose name looks credential-shaped is refused outright (see
+`lib/json-tools.mjs`). Every write is atomic (temp file + rename), so a
+reader never sees a half-written journal.
+
+### Observability: structured events, not chain-of-thought
+
+`events.jsonl` answers "what happened" without ever recording a model's
+internal reasoning: `run.created`, `project.detected` (languages, package
+manager, framework names, validation-command count — never file contents),
+`context.started/completed` (with
+character counts and which sources were used — memory/graph/external —
+never the content itself), `lead.started/completed/failed`,
+`validation.started/completed`, `review.started/completed/failed`,
+`correction.started/completed/failed`, `run.resumed`,
+`run.state_changed`. Every line carries `schema_version` and a timestamp.
+
+```sh
+agent logs <run-id>          # human-readable
+agent logs <run-id> --json   # raw structured lines
+```
+
+### Failure taxonomy (P2.7)
+
+`CONFIGURATION | AUTHENTICATION | QUOTA | RATE_LIMIT |
+PROVIDER_UNAVAILABLE | TIMEOUT | CANCELLED | TOOL_FAILURE |
+VALIDATION_FAILURE | REVIEW_FAILURE | MALFORMED_OUTPUT |
+WORKSPACE_CONFLICT | GIT_CONFLICT | INTERNAL` — classified deterministically
+(exit codes, our own timeout/cancel signals, validation/review outcomes)
+first; a small curated text-pattern table is the documented last resort for
+provider-side categories (auth/quota/rate-limit) that DSH's one-shot
+text-in/text-out contract doesn't expose a structured diagnostic for to an
+external caller (see `docs/upstream-findings.md`). **No LLM ever classifies
+a failure.** A failed run's `final.json` looks like:
+
+```json
+{"status":"failed","category":"QUOTA","phase":"review","retryable":false,
+ "message":"Codex quota unavailable","run_id":"..."}
+```
+
+### Timeouts, retries, cancellation
+
+DSH's own subagent providers document **no wall-clock timeout** as a known
+limitation — imposing one is genuinely ours (`policies/runtime.yaml`:
+`claude` 900s, `codex` 600s, `timeout_grace_seconds: 10`). We reuse GNU
+coreutils `timeout --signal=TERM --kill-after=...` (falling back to an
+equivalent bash SIGTERM→grace→SIGKILL loop if it's missing) instead of
+writing a process supervisor: `dsh`'s own CLI already wires `SIGTERM` to a
+full graceful shutdown that terminates its whole managed subprocess tree
+(confirmed in its source — see `docs/upstream-findings.md`), so sending it
+SIGTERM is real, tree-scoped cleanup, not a guess.
+
+Retries are rare and specific (`policies/runtime.yaml`: `retry.
+transient_max_attempts: 2`, `retry.malformed_review_max_attempts: 1`) —
+only `RATE_LIMIT`, `PROVIDER_UNAVAILABLE`, and one retry of a malformed
+reviewer JSON response are ever auto-retried. Authentication, quota,
+validation/review outcomes, and configuration errors never are.
+
+```sh
+agent cancel <run-id>
+```
+
+signals the in-flight call (if any) and marks the run `CANCELLED` — a
+raced `0` exit code from the child never overrides this, because the
+cancel *request* itself (not the child's exit code) is what
+`lib/orchestrate.sh` checks after every call.
+
+### Recovery / resume (P2.10)
+
+**Resume never continues the same internal Claude/Codex session** — every
+subagent call is one-shot by design (upstream fact, not a limitation we
+introduced). Resume means: read our own journal, check the git HEAD hasn't
+moved unaccountably, find the last *safe checkpoint*
+(`CONTEXT_READY`/`IMPLEMENTATION_DONE`/`VALIDATION_DONE`/`REVIEW_DONE`/
+`CORRECTION_DONE`), and issue a **new, self-contained** one-shot call only
+if one is actually needed.
+
+```sh
+agent resume <run-id>            # refuses on a git conflict or an uncertain state
+agent resume <run-id> --force    # proceed anyway (never runs reset/clean/checkout)
+```
+
+| Interrupted during... | Resume does |
+|---|---|
+| context gathering, or before Claude started | restarts cleanly from implementation |
+| Claude was actively editing (mid-`IMPLEMENTING`/`CORRECTING`) | **UNCERTAIN** — refuses without `--force`; nothing was overwritten or guessed |
+| validation (implementation finished) | re-runs validation only |
+| after validation, before Codex was called | calls the reviewer directly, skips re-validating |
+| Codex returned findings, before correction | sends them straight to Claude, skips re-reviewing |
+
+"Uncertain" is detected precisely, not guessed: `events.jsonl` shows
+whether that phase's own call logged a `.completed`/`.failed` after its
+last `.started` — if not, that call was genuinely interrupted mid-flight.
+A moved git HEAD (a commit/checkout/rebase since the run started) is
+always reported, never silently overwritten — **no automatic
+`reset --hard`, `clean -fd`, or `checkout --` is ever performed**, forced
+or not.
+
+### Workspace locking (P2.12)
+
+One `mkdir`-atomic lock per project (keyed by the git repo root, or the
+resolved path outside a repo) stops two runs from writing into the same
+workspace by accident. A lock records `run_id`, `pid`, `hostname`, and
+`created_at`; it's only ever auto-reclaimed when it's provably stale (same
+host, dead PID) — a lock from a **different host** is never auto-broken
+(can't verify a foreign PID namespace).
+
+```sh
+agent status         # shows lock state
+agent unlock [/path]  # explicit, human-driven override; always reports what it removed
+```
+
+### Enhanced doctor and version drift (P2.14/P2.15)
+
+`agent doctor` gained **Run storage**, **Locks**, and **Versions**
+sections — state-directory writability, corrupt-journal detection, stale
+locks, and drift between `versions.yaml`'s pins and what's *actually*
+resolved inside each DSH profile's own `node_modules` (not a host
+`claude`/`codex` CLI on `PATH`, which those two Bundles never use — see
+`docs/upstream-findings.md`). Reports `SUPPORTED` / `NEWER_UNTESTED` /
+`OLDER_UNSUPPORTED` / `MISSING` — never blocks on drift, never
+auto-updates (`policies/runtime.yaml`: `versions.auto_update: false`,
+always). Doctor still makes zero LLM calls.
+
+### Operational CLI
+
+```sh
+agent status [/path]           # project, active run, lock, provider presence
+agent runs [/path]             # run_id / state / risk / timestamps
+agent show <run-id>            # sanitized summary (never dumps raw task text)
+agent logs <run-id> [--json]
+agent resume <run-id> [--force]
+agent cancel <run-id>
+agent unlock [/path]
+agent cleanup [/path]          # apply retention (see below)
+```
+
+### Retention (P2.17)
+
+`policies/runtime.yaml`: `runs.retention_days: 30`,
+`runs.retention_max_per_project: 100`. `agent cleanup` removes only
+**terminal** runs (`COMPLETED`/`FAILED`/`CANCELLED`) past those limits — an
+active run or one still `INTERRUPTED` (and therefore resumable) is never
+touched, and nothing inside your project's own repo is ever touched either.
+
+### Token/LLM-call impact (P2)
+
+**Zero.** Every mechanism above — the journal, events, failure
+classification, timeouts, retries, locking, git-safety checks, doctor,
+version drift — is local and deterministic. A normal run makes exactly the
+same Claude/Codex calls P1 made; P2 adds reliability around those calls,
+not more of them.
+
 ## Security
 
 - **Codex is read-only at the mechanism level, not just by prompt.** The
@@ -516,6 +753,23 @@ See the honest limitation on what this can and can't measure in
   `research_needed`'s heuristic (a URL, "latest version", "official docs",
   etc.); it's deliberately conservative so the repo's own contents are
   preferred over a network call.
+- **`another run is already active in this workspace`** — check
+  `agent status`; if the reported PID/host is dead, the next `agent`/
+  `agent resume` auto-reclaims it (same host only). To force it now, run
+  `agent unlock [/path]`.
+- **a run seems stuck / a VPS rebooted mid-run** — `agent status` and
+  `agent show <run-id>` tell you the last safe checkpoint; `agent resume
+  <run-id>` continues from there (`--force` only for an UNCERTAIN state or
+  a moved git HEAD you've verified is fine — never runs `reset --hard`/
+  `clean -fd`/`checkout --`).
+- **doctor reports NEWER_UNTESTED/OLDER_UNSUPPORTED under "Versions"** —
+  the Claude Agent SDK or Codex wrapper actually bundled in a profile's
+  `node_modules` differs from `versions.yaml`'s pin. This never blocks a
+  run by itself; re-run the discovery steps in `docs/upstream-findings.md`
+  before trusting the new combination for anything sensitive.
+- **old runs piling up** — `agent cleanup [/path]` applies
+  `policies/runtime.yaml`'s `runs.retention_days`/`retention_max_per_project`;
+  active/interrupted runs are never removed by it.
 
 ## Compatible versions
 
@@ -526,7 +780,9 @@ wrapper `0.147.0` (via the official bundle), Node `>= 22.19.0`, pnpm
 Agent-Reach `1.5.0` (reference only — not required, see
 [Context tools](#context-tools)). DSH and the three P1 tools are all fast-
 moving; re-run the discovery steps in `docs/upstream-findings.md` before
-bumping any of these.
+bumping any of these. `policies/runtime.yaml` holds the P2 operational
+numbers (timeouts, retry attempts, retention, `versions.auto_update:
+false`) — see [Operational hardening (P2)](#operational-hardening-p2).
 
 ## Known limitations
 
@@ -563,11 +819,32 @@ bumping any of these.
   fallback, not a second orchestrator-driven re-fetch round.
 - `.agent/config.yaml` has no schema validation yet — a malformed override
   is silently ignored for the keys it doesn't match rather than rejected.
+- **Failure classification for provider-side categories (auth/quota/
+  rate-limit/provider-unavailable) is best-effort text-pattern matching**
+  on the `dsh` process's own stdout/stderr, not a structured diagnostic —
+  DSH's driving model relays a subagent tool's error as its own final
+  text rather than exposing the subagent's own diagnostic fields to an
+  external caller (see `docs/upstream-findings.md` P2 section). Exit
+  codes, our own timeout/cancel signals, and validation/review outcomes
+  are fully deterministic; this subset is honestly heuristic.
+- **"Uncertain" resume can't distinguish "Claude finished writing but the
+  process died before logging completion" from "Claude was still
+  writing"** — both look identical from outside (no completion event
+  logged), so both are conservatively treated as uncertain rather than
+  risking a false "safe to continue".
+- Workspace locking is local-machine only (an `mkdir`-atomic lock, no
+  distributed coordination) — by design, for a single-VPS personal stack.
+- Resume never performs `git reset --hard`, `git clean -fd`, or
+  `git checkout --`, even with `--force` — a git conflict or an uncertain
+  state it can't resolve safely is reported, not auto-fixed.
 
-## Future scope (P2+)
+## Future scope (P3+)
 
 Explicitly deferred: a dashboard, multi-user/SaaS support, Kubernetes, a
 remote database, a custom UI, a generic plugin/provider system, a required
 local model, a custom embeddings/vector-DB stack, budget-escalation rounds
-beyond one context package per run, and `.agent/config.yaml` schema
-validation.
+beyond one context package per run, `.agent/config.yaml` schema
+validation, a mandatory remote tracing platform, third-party telemetry, a
+distributed job queue/scheduler, and an optional git-worktree isolation
+mode (investigated in P2 discovery, not built — the default remains
+operating directly in the given workspace).

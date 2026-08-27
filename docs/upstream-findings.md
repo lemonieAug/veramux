@@ -465,3 +465,188 @@ project overrides are unaffected by this choice — they were always ours.
   in doctor; should be re-confirmed against the installed Codex CLI version's
   own docs since this is exactly the kind of thing that changes release to
   release.
+
+## P2 discovery: baseline + operational-hardening mechanics
+
+Discovery phase for the P2 milestone ("daily driver" hardening). Method
+unchanged from P0/P1: re-ran the existing test suites for a baseline, then
+inspected the actually-pinned upstream source (a fresh shallow clone of the
+exact tag in `versions.yaml`, not a re-read of memory or a web summary),
+rather than assuming P0/P1's findings still hold by default.
+
+### Baseline (2026-08-26, this checkout, commit `8719753`)
+
+- `bash tests/unit/run.sh`: **all 15 suites pass, 153 assertions, 0
+  failures** (test_benchmark 9, test_context 9, test_doctor 6, test_graph
+  10, test_memory 6, test_orchestrate 27, test_project_config 10,
+  test_redact 6, test_research 8, test_review_contract 9,
+  test_reviewer_readonly 24, test_risk 14, test_validation 9,
+  test_workspace 6). No LLM quota spent — everything here runs against the
+  mock-dsh/mock-graphify/mock-memory-server fixtures.
+- `bash tests/integration/run.sh`: skipped by design
+  (`RUN_LLM_INTEGRATION_TESTS` unset) — exits 0 without spending real
+  Claude/Codex usage. This is existing P0 behavior, not new to P2.
+- `agent doctor` on this dev machine: 7 issues, 1 blocking (`dsh` itself is
+  not installed here — this is a Windows dev checkout, not the target VPS).
+  Everything doctor *can* check locally (git, Node, pnpm, the `claude`/
+  `codex` host CLIs, policy files, safety scan) reports correctly. This
+  confirms doctor already fails closed/loud rather than crashing when the
+  harness isn't present — the baseline P2 hardening builds on, not a
+  regression to fix.
+
+### Upstream drift check (dsh itself: none; bundled products: real, expected)
+
+- **DSH repo itself has not moved since P1.** GitHub API confirms
+  `dsh-v0.1.1-rc.2` (commit `b150a551`) is still the newest tag, and the
+  repo's `pushed_at` is `2026-08-21T12:35:08Z` — no commits landed after the
+  P1 investigation. Re-cloned that exact tag into a scratch dir for P2 (full
+  local install wasn't necessary — a shallow source clone is sufficient to
+  read real behavior, and doesn't touch the user's machine). Every P0/P1
+  finding about DSH's own mechanics (one-shot subagents, config layering,
+  `--dump-config`, headless exit-code semantics, `DSH_TOOLS_MODE` Code Mode,
+  credential scrubbing) is **re-confirmed current**, not re-derived from
+  scratch.
+- **Bundled product versions have drifted, as expected for a moving
+  ecosystem**, and `versions.yaml`'s pins are unaffected because they pin
+  *transitive* versions, not the host CLI:
+  - `@anthropic-ai/claude-agent-sdk` (what `dsh-subagent-claude-code`
+    actually bundles): pinned `0.3.220` vs npm `latest` `0.3.246` (dist-tag
+    `next`: `0.3.247`) — NEWER_UNTESTED, real drift.
+  - `@openai/codex` (what `dsh-subagent-codex` actually bundles): pinned
+    `0.147.0` vs npm `latest` `0.150.0` — NEWER_UNTESTED, real drift.
+  - The **host** `claude`/`codex` CLIs on this dev machine (2.1.246 /
+    0.149.1) are a separate, lower-priority signal: neither is used by the
+    stack (each subagent Bundle selects its own pinned platform payload
+    transitively; see "Product compatibility and evidence" in each
+    provider's README), so doctor should keep reporting host-CLI presence
+    as a login/auth heuristic only, never as the thing that determines
+    compatibility. **This distinction — bundled-transitive version vs.
+    host-CLI version — is the concrete design input for P2.15**: version
+    drift detection must compare against what a Profile's own
+    `node_modules` actually resolved (or, when that's not locally
+    inspectable, against the Bundle's declared pinned dependency), not
+    against whatever host binary happens to be on `PATH`.
+
+### Cancellation / process-lifecycle: confirmed from source, not assumed
+
+This directly answers the spec's P2.8 question ("verifique o que DeepSeek
+Harness já faz; reutilize upstream; não implemente outro process
+supervisor").
+
+- **Both subagent providers explicitly document "No wall-clock timeout" as
+  a known limitation** (`dsh-subagent-claude-code` and `dsh-subagent-codex`
+  READMEs, "Known Limitations and Deferred Work": *"No wall-clock timeout
+  or side-effect rollback — the caller cancels long work..."*). DSH does
+  not, and will not, impose a deadline on a Claude Code/Codex call for us —
+  **this confirms P2.8 (timeouts) is genuinely ours to build**, wrapping
+  the `dsh` CLI invocation itself.
+- **But process-tree cleanup on cancellation is real and already fully
+  implemented upstream.** From `packages/subprocess` (`docs/subsystems/
+  subprocess.md`): every managed child is a `SubprocessHandle` whose only
+  termination verb, `terminate()`, escalates **SIGTERM → `graceMs` →
+  SIGKILL**, is **tree-scoped on every platform** (POSIX: signal the
+  detached process group; Windows: `taskkill /T`), and whose
+  `waitForExit()` observes the *whole tree*, not just the direct child.
+  Both subagent providers' `dispose()` is documented idempotent and
+  explicitly "invokes the shared process-tree termination escalation, and
+  waits for whole-tree exit" (`disposeGraceMs` config, default `3000`ms).
+- **The `dsh` CLI process itself already wires OS signals to that
+  disposal.** Confirmed directly in `apps/cli/src/profile-boot.ts`:
+  ```
+  process.on('SIGTERM', () => { interrupt(0) })
+  process.on('SIGINT', () => { interrupt(130) })
+  ```
+  where `interrupt()` aborts a signal-shutdown controller and disposes the
+  whole booted context (`app.current?.fiber.dispose()`), which in turn
+  disposes every mounted service including `ctx.subprocess` ("Disposal of
+  the service terminates all still-running managed processes and awaits
+  their exit" — same subprocess subsystem doc). SIGTERM is documented to
+  always exit 0 ("a supervisor's ordinary stop request"); SIGINT exits 130
+  ("a user interrupt").
+- **Consequence for P2.8/P2.16 design (confirmed, not a new assumption)**:
+  our own timeout/cancel mechanism should send **SIGTERM to the `dsh`
+  process** we spawned (never SIGKILL first) and wait a bounded grace
+  period (a few seconds longer than the subagent's own `disposeGraceMs`,
+  to let upstream's own escalation ladder finish) before falling back to
+  SIGKILL as a last resort. This reuses upstream's real, tree-scoped,
+  already-tested cleanup instead of us hunting down and killing child PIDs
+  ourselves — exactly the "não crie process supervisor paralelo" principle.
+  `agent cancel` and the P2.8 timeout wrapper are the same mechanism: send
+  SIGTERM to the tracked `dsh` PID, wait, escalate.
+- **No wall-clock timeout also means no built-in retry/backoff for us to
+  reuse** — P2.9's retry policy is ours to write, operating at the level of
+  "re-invoke `dsh --profile ... "..."` once more", not at DSH's internal
+  layer.
+
+### Jobs / workflow / session APIs: real, but not the right seam for us
+
+Confirmed real, existing packages (`packages/jobs`, `packages/workflow`,
+`packages/session`) — not invented:
+
+- `packages/jobs` (`ctx.jobs`, `dsh-jobs-local`, `dsh-tool-jobs`): a real
+  owner-fenced background-job registry with cancellation
+  (`job_kill`)/completion notices, but it is a **tool the driving model
+  calls**, gated per `dsh-tool-subagent` row by `backgroundMode`. Our
+  `lead`/`reviewer` profiles give their driving DeepSeek model exactly one
+  tool with a fixed one-shot call (per the P0 design already in place) —
+  there is no background-job row configured, so this family isn't in our
+  invocation path today. Adopting it would mean asking the *cheap DeepSeek
+  brain* to decide when to background a call and poll for it — more moving
+  parts than P2 needs, since our synchronous foreground call already blocks
+  exactly as long as we want it to (bounded by our own new timeout wrapper).
+- `packages/workflow` (`ctx.workflowEngine`, `tool-workflow`, `tool-ralph`):
+  model-authored orchestration scripts running in a worker thread — again a
+  tool for a driving model to call dynamically. This is not "the same
+  conversation resumed"; it is DSH's own take on multi-step tool
+  orchestration, gated behind giving a model that tool. We already own our
+  deterministic Claude→validate→Codex→correct loop in `lib/orchestrate.sh`
+  (bash, testable without quota, per the P0 design rationale) — re-platforming
+  it onto `tool-workflow` would move hard round-limit/contract-validation
+  logic into a system prompt again, which P0's own discovery already argued
+  against. Confirms: no reason to change course for P2.
+- `packages/session` (`session-persistence`, `session-persistence-jsonl`,
+  `session-persistence-sqlite`, ...): real durable persistence, but it
+  persists **one DSH session's own conversation log** (the driving model's
+  turns/tool-calls) — not something our headless one-shot `dsh --profile
+  lead "task"` invocation exposes for us to resume externally, and each
+  subagent run explicitly sets `persistSession: false` and reports
+  `inheritsParentContext: false` (confirmed in both subagent providers'
+  READMEs). This directly matches the spec's own instruction: **do not
+  base P2 recovery on resuming a DSH/Claude/Codex internal session** — our
+  own run journal (P2.5) is the only durable state that can survive a
+  restart, because it's the only thing *we* control end to end.
+
+### What P2 will NOT build (already provided upstream)
+
+- Process-tree termination, SIGTERM→grace→SIGKILL escalation, whole-tree
+  quiescence detection → `dsh-subprocess`/`dsh-subprocess-local`
+  (`SubprocessHandle.terminate`/`waitForExit`).
+- OS signal → graceful shutdown wiring for the `dsh` CLI process itself →
+  `apps/cli/src/profile-boot.ts` (`SIGTERM`/`SIGINT` handlers already call
+  full context disposal).
+- Any form of durable *session* persistence, if we ever wanted it for the
+  DSH-side driving model → `packages/session`. Not used by P2, which
+  persists our own run journal instead (see above: not the same thing).
+
+### What P2 still has to build ourselves (confirmed genuinely ours)
+
+- The wall-clock timeout wrapper around each `dsh --profile ... "..."` call
+  (P2.8) — DSH will never impose one itself.
+- The run journal, lifecycle state machine, structured events, failure
+  taxonomy, retry policy, workspace locking, and CLI operational commands —
+  none of these exist upstream in a form our headless one-shot invocation
+  could reuse; they operate one level up, around the `dsh` process
+  boundary, exactly where P0/P1's own `lib/orchestrate.sh` already lives.
+- Failure-category detection for the *product* side (auth/quota/rate-limit/
+  provider-unavailable) is necessarily best-effort text-pattern matching on
+  the `dsh` process's own stdout/stderr, because our profiles' driving
+  model (DeepSeek) relays the subagent tool's error as its own final text
+  rather than DSH exposing the subagent's own structured diagnostic
+  (`SubagentResult.diagnostic`'s stage/category fields) to an external
+  caller — that diagnostic is documented as part of the *tool result seen
+  by the driving model inside the DSH session*, not part of `dsh`'s own
+  CLI-process-level stdout/exit-code contract. This is flagged here
+  explicitly rather than silently assumed: P2's failure taxonomy is honest
+  about being heuristic for this subset of categories, deterministic for
+  everything else (exit codes, our own timeout signal, validation/review
+  outcomes, lock conflicts, git-state checks).

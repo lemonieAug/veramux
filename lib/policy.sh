@@ -28,6 +28,28 @@ policy_get() {
   fi
 }
 
+# policy_get_toplevel <file> <key> [default]
+# Prints a bare top-level scalar (no section nesting), e.g. policies/
+# runtime.yaml's `timeout_grace_seconds: 10`. Same shape orchestrate.sh
+# already used ad hoc for orchestration.yaml's `max_correction_rounds`,
+# generalized so P2 code doesn't repeat the grep/awk each time.
+policy_get_toplevel() {
+  local file="$1" key="$2" default="${3:-}"
+  local value
+  value="$(awk -v key="$key" '
+    $0 ~ ("^" key ":") {
+      sub("^" key ":[[:space:]]*", "")
+      print
+      exit
+    }
+  ' "$file" 2>/dev/null | sed -E 's/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/; s/[[:space:]]*#.*$//')"
+  if [ -z "$value" ]; then
+    printf '%s' "$default"
+  else
+    printf '%s' "$value"
+  fi
+}
+
 # policy_get_bool <file> <section> <key> <default: true|false>
 policy_get_bool() {
   local file="$1" section="$2" key="$3" default="$4"

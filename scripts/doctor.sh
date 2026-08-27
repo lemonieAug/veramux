@@ -16,12 +16,20 @@ source "$ROOT_DIR/lib/project.sh"
 source "$ROOT_DIR/lib/project_config.sh"
 # shellcheck source=../lib/validation.sh
 source "$ROOT_DIR/lib/validation.sh"
+# shellcheck source=../lib/project_detect.sh
+source "$ROOT_DIR/lib/project_detect.sh"
 # shellcheck source=../lib/graph.sh
 source "$ROOT_DIR/lib/graph.sh"
 # shellcheck source=../lib/memory.sh
 source "$ROOT_DIR/lib/memory.sh"
 # shellcheck source=../lib/risk.sh
 source "$ROOT_DIR/lib/risk.sh"
+# shellcheck source=../lib/run_lifecycle.sh
+source "$ROOT_DIR/lib/run_lifecycle.sh"
+# shellcheck source=../lib/state_paths.sh
+source "$ROOT_DIR/lib/state_paths.sh"
+# shellcheck source=../lib/version_drift.sh
+source "$ROOT_DIR/lib/version_drift.sh"
 
 DSH_HOME_DIR="$(env_dsh_home)"
 FAILURES=0
@@ -180,6 +188,87 @@ else
   crit "orchestration.yaml missing max_correction_rounds"
 fi
 
+section "Run storage (P2.5)"
+STATE_DIR="$(state_root_dir)"
+if mkdir -p "$STATE_DIR" 2>/dev/null && [ -w "$STATE_DIR" ]; then
+  ok "state directory writable: $STATE_DIR"
+else
+  bad "state directory not writable: $STATE_DIR"
+fi
+RUNS_ROOT="$(state_runs_root_dir)"
+CORRUPT_COUNT=0
+if [ -d "$RUNS_ROOT" ]; then
+  while IFS= read -r -d '' rj; do
+    node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$rj" >/dev/null 2>&1 || CORRUPT_COUNT=$((CORRUPT_COUNT + 1))
+  done < <(find "$RUNS_ROOT" -name run.json -print0 2>/dev/null)
+fi
+if [ "$CORRUPT_COUNT" -eq 0 ]; then
+  ok "no corrupt run journal detected"
+else
+  bad "$CORRUPT_COUNT corrupt run.json file(s) detected under $RUNS_ROOT"
+fi
+ok "run journal schema_version 1 supported"
+
+section "Locks (P2.12)"
+LOCKS_DIR="$(state_locks_dir)"
+STALE_LOCK_COUNT=0
+if [ -d "$LOCKS_DIR" ]; then
+  HERE_HOST="$(hostname 2>/dev/null || echo unknown)"
+  while IFS= read -r -d '' lockdir; do
+    infofile="$lockdir/info"
+    [ -f "$infofile" ] || continue
+    l_run="" l_pid="" l_host="" l_created=""
+    IFS=$'\t' read -r l_run l_pid l_host l_created < "$infofile"
+    if [ "$l_host" = "$HERE_HOST" ] && ! kill -0 "$l_pid" 2>/dev/null; then
+      STALE_LOCK_COUNT=$((STALE_LOCK_COUNT + 1))
+    fi
+  done < <(find "$LOCKS_DIR" -maxdepth 1 -type d -name '*.lock.d' -print0 2>/dev/null)
+fi
+if [ "$STALE_LOCK_COUNT" -eq 0 ]; then
+  ok "no stale lock detected"
+else
+  bad "$STALE_LOCK_COUNT stale lock(s) detected — run 'agent unlock <path>' for the affected project"
+fi
+
+section "Versions (P2.15 — detect drift, never auto-update)"
+DSH_INSTALLED="$(version_drift_installed_dsh)"
+DSH_PINNED="$(version_drift_pinned dsh)"
+case "$(version_drift_status "$DSH_INSTALLED" "$DSH_PINNED")" in
+  SUPPORTED) ok "dsh: installed $DSH_INSTALLED matches the tested pin" ;;
+  MISSING) info "dsh: not installed — cannot check version drift" ;;
+  NEWER_UNTESTED) bad "dsh: installed $DSH_INSTALLED is NEWER than the tested pin $DSH_PINNED — re-run discovery (docs/upstream-findings.md) before relying on it" ;;
+  OLDER_UNSUPPORTED) bad "dsh: installed $DSH_INSTALLED is OLDER than the tested pin $DSH_PINNED — upgrade recommended" ;;
+  *) info "dsh: could not compare versions ($DSH_INSTALLED vs $DSH_PINNED)" ;;
+esac
+
+SDK_INSTALLED="$(version_drift_installed_claude_agent_sdk "$DSH_HOME_DIR")"
+if [ -n "$SDK_INSTALLED" ]; then
+  SDK_PINNED="$(version_drift_pinned claude_agent_sdk)"
+  case "$(version_drift_status "$SDK_INSTALLED" "$SDK_PINNED")" in
+    SUPPORTED) ok "Claude Agent SDK (bundled in lead profile): $SDK_INSTALLED matches the tested pin" ;;
+    NEWER_UNTESTED) bad "Claude Agent SDK: bundled $SDK_INSTALLED is NEWER than the tested pin $SDK_PINNED" ;;
+    OLDER_UNSUPPORTED) bad "Claude Agent SDK: bundled $SDK_INSTALLED is OLDER than the tested pin $SDK_PINNED" ;;
+    *) info "Claude Agent SDK: could not compare versions" ;;
+  esac
+else
+  info "Claude Agent SDK: lead profile not installed yet — cannot check bundled version"
+fi
+
+CODEX_WRAPPER_INSTALLED="$(version_drift_installed_codex_wrapper "$DSH_HOME_DIR")"
+if [ -n "$CODEX_WRAPPER_INSTALLED" ]; then
+  CODEX_WRAPPER_PINNED="$(version_drift_pinned codex_wrapper)"
+  case "$(version_drift_status "$CODEX_WRAPPER_INSTALLED" "$CODEX_WRAPPER_PINNED")" in
+    SUPPORTED) ok "Codex wrapper (bundled in reviewer profile): $CODEX_WRAPPER_INSTALLED matches the tested pin" ;;
+    NEWER_UNTESTED) bad "Codex wrapper: bundled $CODEX_WRAPPER_INSTALLED is NEWER than the tested pin $CODEX_WRAPPER_PINNED" ;;
+    OLDER_UNSUPPORTED) bad "Codex wrapper: bundled $CODEX_WRAPPER_INSTALLED is OLDER than the tested pin $CODEX_WRAPPER_PINNED" ;;
+    *) info "Codex wrapper: could not compare versions" ;;
+  esac
+else
+  info "Codex wrapper: reviewer profile not installed yet — cannot check bundled version"
+fi
+info "host 'claude'/'codex' CLIs on PATH (checked above) are a separate, non-authoritative signal — see docs/upstream-findings.md (each Bundle uses its own pinned payload, not a host CLI)"
+info "auto_update is always off (policies/runtime.yaml versions.auto_update: false) — this stack only detects and reports drift"
+
 PROJECT_PATH="${1:-}"
 if [ -n "$PROJECT_PATH" ]; then
   section "Project ($PROJECT_PATH)"
@@ -190,11 +279,21 @@ if [ -n "$PROJECT_PATH" ]; then
     else
       bad "not a git repository — git diff/status based review will not work"
     fi
-    ECOSYSTEM="$(project_detect_ecosystem "$RESOLVED" | tr '\n' ' ')"
+    ECOSYSTEM="$( { project_detect_ecosystem "$RESOLVED"; project_detect_ecosystems_extended "$RESOLVED"; } | tr '\n' ' ')"
     if [ -n "$(echo "$ECOSYSTEM" | tr -d '[:space:]')" ]; then
       ok "ecosystem detected: $ECOSYSTEM"
     else
-      info "no known ecosystem detected (node/python/make) — validation will be empty"
+      info "no known ecosystem detected — validation will be empty"
+    fi
+    if [ -f "$RESOLVED/package.json" ]; then
+      PM_ERR="$(mktemp)"
+      PM="$(project_pm_resolve "$RESOLVED" 2>"$PM_ERR")" || true
+      if [ -s "$PM_ERR" ]; then
+        bad "$(cat "$PM_ERR")"
+      elif [ -n "$PM" ]; then
+        ok "package manager: $PM"
+      fi
+      rm -f "$PM_ERR"
     fi
     COMMANDS="$(validation_detect_commands "$RESOLVED" false || true)"
     if [ -n "$COMMANDS" ]; then
