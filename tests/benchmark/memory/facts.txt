@@ -1,0 +1,10 @@
+The project deploys to a single Hetzner VPS in Falkenstein.
+The reviewer profile is Codex, pinned read-only via cordis.patch.yml.
+Run journals live under ~/.local/state/agent-stack/runs.
+The correction loop is capped at max_correction_rounds in policies/orchestration.yaml.
+Graphify is installed from PyPI as the package "graphifyy" (double y).
+claude-mem's worker default port is 3777.
+The lead profile bundles the Claude Agent SDK, not a host claude CLI.
+HIGH-risk changes always get a Codex review plus a verification pass.
+The benchmark offline mode uses zero LLM quota.
+Secret-shaped field names are rejected before any journal write.

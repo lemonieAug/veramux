@@ -30,6 +30,14 @@ source "$ROOT_DIR/lib/run_lifecycle.sh"
 source "$ROOT_DIR/lib/state_paths.sh"
 # shellcheck source=../lib/version_drift.sh
 source "$ROOT_DIR/lib/version_drift.sh"
+# shellcheck source=../lib/compat.sh
+source "$ROOT_DIR/lib/compat.sh"
+# shellcheck source=../lib/capability_probe.sh
+source "$ROOT_DIR/lib/capability_probe.sh"
+# shellcheck source=../lib/inventory.sh
+source "$ROOT_DIR/lib/inventory.sh"
+# shellcheck source=../lib/profiles.sh
+source "$ROOT_DIR/lib/profiles.sh"
 
 DSH_HOME_DIR="$(env_dsh_home)"
 FAILURES=0
@@ -318,6 +326,26 @@ if [ -n "$PROJECT_PATH" ]; then
     crit "$RESOLVED"
   fi
 fi
+
+section "Maintenance (P3)"
+info "active optimization profile: $(profile_active 2>/dev/null || echo balanced)"
+_incompat=0
+while IFS= read -r _c; do
+  [ -n "$_c" ] || continue
+  _v="$(inventory_detect_version "$_c" 2>/dev/null)"
+  [ -n "$_v" ] || continue
+  if [ "$(capability_verdict "$_c" 2>/dev/null)" = "INCOMPATIBLE" ]; then
+    bad "$_c: a required capability probes INCOMPATIBLE — run 'agent inventory' and 'agent update plan $_c'"
+    _incompat=1
+  fi
+done < <(compat_components 2>/dev/null)
+[ "$_incompat" -eq 0 ] && ok "no component reports an INCOMPATIBLE capability"
+_snap_root="$(state_snapshots_dir 2>/dev/null)"
+if [ -d "$_snap_root" ]; then
+  _snaps="$(find "$_snap_root" -maxdepth 1 -type d -name 'snap-*' 2>/dev/null | wc -l | tr -d ' ')"
+  info "$_snaps pre-update snapshot(s) retained ($_snap_root)"
+fi
+info "'agent update check' shows what has a newer version (deterministic, no LLM, no changes)"
 
 echo
 if [ "$CRITICAL_FAILURES" -gt 0 ]; then

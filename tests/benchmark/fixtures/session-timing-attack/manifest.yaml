@@ -1,0 +1,10 @@
+id: session-timing-attack
+category: E
+description: "category E fixture"
+expected_risk: high
+expected_review: verify
+expected_tools: none
+changed_paths: src/auth/session.js
+always_review: 0
+planted_bug: false
+live_only_checks: none

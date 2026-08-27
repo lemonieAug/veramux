@@ -10,6 +10,8 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$ROOT_DIR/lib/environment.sh"
 # shellcheck source=../lib/policy.sh
 source "$ROOT_DIR/lib/policy.sh"
+# shellcheck source=../lib/profiles.sh
+source "$ROOT_DIR/lib/profiles.sh"
 # shellcheck source=../lib/project.sh
 source "$ROOT_DIR/lib/project.sh"
 # shellcheck source=../lib/project_config.sh
@@ -52,6 +54,38 @@ source "$ROOT_DIR/lib/run_cli.sh"
 source "$ROOT_DIR/lib/cleanup.sh"
 # shellcheck source=../lib/version_drift.sh
 source "$ROOT_DIR/lib/version_drift.sh"
+# shellcheck source=../lib/compat.sh
+source "$ROOT_DIR/lib/compat.sh"
+# shellcheck source=../lib/capability_probe.sh
+source "$ROOT_DIR/lib/capability_probe.sh"
+# shellcheck source=../lib/inventory.sh
+source "$ROOT_DIR/lib/inventory.sh"
+# shellcheck source=../lib/update_discovery.sh
+source "$ROOT_DIR/lib/update_discovery.sh"
+# shellcheck source=../lib/update_plan.sh
+source "$ROOT_DIR/lib/update_plan.sh"
+# shellcheck source=../lib/migration_detect.sh
+source "$ROOT_DIR/lib/migration_detect.sh"
+# shellcheck source=../lib/snapshot.sh
+source "$ROOT_DIR/lib/snapshot.sh"
+# shellcheck source=../lib/update_stage.sh
+source "$ROOT_DIR/lib/update_stage.sh"
+# shellcheck source=../lib/update_verify.sh
+source "$ROOT_DIR/lib/update_verify.sh"
+# shellcheck source=../lib/update_apply.sh
+source "$ROOT_DIR/lib/update_apply.sh"
+# shellcheck source=../lib/rollback.sh
+source "$ROOT_DIR/lib/rollback.sh"
+# shellcheck source=../lib/benchmark.sh
+source "$ROOT_DIR/lib/benchmark.sh"
+# shellcheck source=../lib/backup.sh
+source "$ROOT_DIR/lib/backup.sh"
+# shellcheck source=../lib/release.sh
+source "$ROOT_DIR/lib/release.sh"
+# shellcheck source=../lib/memexp.sh
+source "$ROOT_DIR/lib/memexp.sh"
+# shellcheck source=../lib/update_cli.sh
+source "$ROOT_DIR/lib/update_cli.sh"
 # shellcheck source=../lib/orchestrate.sh
 source "$ROOT_DIR/lib/orchestrate.sh"
 # shellcheck source=../lib/resume.sh
@@ -87,6 +121,27 @@ Operational commands (P2 — never call an LLM):
   agent unlock [/path]         Force-remove a workspace lock (see doctor first)
   agent cleanup [/path]        Apply run retention (policies/runtime.yaml)
 
+Maintenance commands (P3 — 'check'/'plan'/'inventory'/'benchmark --offline'/
+'backup'/'release'/'memexp' make ZERO changes and ZERO LLM calls):
+  agent inventory [--json]     Installed vs tested versions + capability status
+  agent update check           Discover newer published versions (read-only)
+  agent update plan [<comp>]   Show exactly what an update would do (read-only)
+  agent update apply <comp> [--to <v>] [--yes]
+                                Snapshot -> stage -> verify -> apply -> post-verify
+  agent update rollback [<snapshot-id>]
+                                Restore config from a pre-update snapshot
+  agent benchmark [--offline|--live|compare <a> <b>]
+                                Deterministic (offline) or real (live) quality/
+                                cost benchmark; compare detects regressions
+  agent backup [--out <path>] / agent restore <archive> [--yes]
+                                Portable stack-config backup (no secrets/projects)
+  agent release [list|show <v>|create <v>|verify <v>]
+                                Known-good stack manifests (reproducible install)
+  agent memexp [report|...]     Opt-in claude-mem cost experiment (never switches)
+  agent --profile economy|balanced|strict <task...>
+                                Run under an optimization profile (default: balanced)
+  agent profile [/path]        Show the active optimization profile
+
 If no task text is given, agent reads one line from stdin when input is
 piped, or prompts interactively when attached to a terminal.
 
@@ -111,9 +166,33 @@ agent_read_task_interactively() {
 }
 
 main() {
+  # P3.14: pull a global --profile <name> / --profile=<name> out of the
+  # args from anywhere before dispatching. Exported so lib/context.sh and
+  # lib/risk.sh (via lib/profiles.sh) pick it up.
+  local -a _args=() _a
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --profile) shift; AGENT_PROFILE="${1:-}"; export AGENT_PROFILE; shift || true ;;
+      --profile=*) AGENT_PROFILE="${1#--profile=}"; export AGENT_PROFILE; shift ;;
+      *) _args+=("$1"); shift ;;
+    esac
+  done
+  set -- "${_args[@]+"${_args[@]}"}"
+  if [ -n "${AGENT_PROFILE:-}" ] && ! profile_is_valid "$AGENT_PROFILE"; then
+    echo "error: unknown --profile '$AGENT_PROFILE' (valid: $PROFILE_NAMES)" >&2
+    exit 2
+  fi
+
   case "${1:-}" in
     --help|-h)
       agent_help
+      exit 0
+      ;;
+    profile)
+      shift
+      local pws
+      pws="$(project_resolve_workspace "${1:-.}" 2>/dev/null || echo "")"
+      profile_describe "$pws"
       exit 0
       ;;
     --version|-v)
@@ -180,6 +259,67 @@ main() {
       fi
       cleanup_apply_retention "$ws"
       exit 0
+      ;;
+    update)
+      shift
+      update_cli_dispatch "$@"
+      exit $?
+      ;;
+    inventory)
+      shift
+      [ "${1:-}" = "--json" ] && { inventory_json --probe; echo; exit 0; }
+      inventory_print --probe
+      exit 0
+      ;;
+    benchmark)
+      shift
+      case "${1:-}" in
+        --offline|"") benchmark_suite --offline; exit $? ;;
+        --live)
+          echo "WARNING: 'agent benchmark --live' runs every fixture through the real Claude and Codex profiles and spends usage." >&2
+          if [ -t 0 ]; then printf 'continue? [y/N] ' >&2; read -r r; case "$r" in y|Y|yes) ;; *) echo "aborted."; exit 1 ;; esac
+          elif [ "${AGENT_BENCHMARK_LIVE_YES:-}" != "1" ]; then echo "refusing to run --live non-interactively without AGENT_BENCHMARK_LIVE_YES=1" >&2; exit 1; fi
+          benchmark_suite --live; exit $? ;;
+        compare)
+          shift
+          [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "usage: agent benchmark compare <baseline.json> <candidate.json>" >&2; exit 2; }
+          benchmark_compare "$1" "$2"; exit $? ;;
+        *) echo "usage: agent benchmark [--offline|--live|compare <a> <b>]" >&2; exit 2 ;;
+      esac
+      ;;
+    backup)
+      shift
+      case "${1:-}" in
+        list) backup_list; exit 0 ;;
+        *) backup_create "$@"; exit $? ;;
+      esac
+      ;;
+    restore)
+      shift
+      [ -n "${1:-}" ] || { echo "usage: agent restore <backup.tar.gz> [--yes]" >&2; exit 2; }
+      backup_restore "$@"; exit $?
+      ;;
+    release)
+      shift
+      case "${1:-}" in
+        list|"") release_list; exit 0 ;;
+        show) shift; release_show "${1:-}"; exit $? ;;
+        create) shift; release_create "$@"; exit $? ;;
+        verify) shift; release_verify "${1:-}"; exit $? ;;
+        *) echo "usage: agent release [list|show <v>|create <v>|verify <v>]" >&2; exit 2 ;;
+      esac
+      ;;
+    memexp)
+      shift
+      case "${1:-}" in
+        baseline|"") memexp_baseline; exit 0 ;;
+        facts) memexp_facts; exit 0 ;;
+        queries) memexp_queries; exit 0 ;;
+        score) shift; memexp_score "${1:-}"; exit $? ;;
+        compare) shift; memexp_compare "${1:-}" "${2:-}"; exit $? ;;
+        report) memexp_report; exit 0 ;;
+        *) echo "usage: agent memexp [baseline|facts|queries|score <f>|compare <b> <c>|report]" >&2; exit 2 ;;
+      esac
       ;;
   esac
 

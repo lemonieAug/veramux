@@ -41,6 +41,9 @@ _context_grep_fallback() {
   local max_files max_chars
   max_files="$(policy_get "$_CTX_POLICY" graph direct_reads_before_graph 3)"
   max_chars="$(policy_get "$_CTX_POLICY" source initial_max_chars 30000)"
+  if command -v profile_budget >/dev/null 2>&1; then
+    max_chars="$(profile_budget source_initial_max_chars "$max_chars" "$workspace")"
+  fi
   env_has_cmd git || return 1
 
   local -a words
@@ -76,9 +79,17 @@ context_build() {
   local workspace="$1" task="$2" out_file="$3"
   : > "$out_file"
 
+  # P3.14: an optimization profile (lib/profiles.sh, present only on a real
+  # `agent` run) can resize these budgets or turn external research off. It
+  # is a no-op when profiles.sh isn't sourced (the P1 suites).
+  _ctx_budget() {
+    local base; base="$(policy_get "$_CTX_POLICY" "$1" "$2" "$3")"
+    if command -v profile_budget >/dev/null 2>&1; then profile_budget "$4" "$base" "$workspace"; else printf '%s' "$base"; fi
+  }
+
   if context_memory_enabled "$workspace"; then
     local memory_max
-    memory_max="$(policy_get "$_CTX_POLICY" memory max_chars 4000)"
+    memory_max="$(_ctx_budget memory max_chars 4000 memory_max_chars)"
     local memory_text
     if memory_text="$(memory_search "$workspace" "$task" "$memory_max")" && [ -n "$memory_text" ]; then
       { echo "## Memory (past work on this project)"; echo; echo "$memory_text"; echo; } >> "$out_file"
@@ -89,7 +100,7 @@ context_build() {
   if context_graph_enabled "$workspace"; then
     graph_ensure_ready "$workspace" || true
     local graph_max
-    graph_max="$(policy_get "$_CTX_POLICY" graph max_chars 8000)"
+    graph_max="$(_ctx_budget graph max_chars 8000 graph_max_chars)"
     local graph_text
     if graph_text="$(graph_query "$workspace" "$task" "$graph_max")" && [ -n "$graph_text" ]; then
       { echo "## Architecture (knowledge graph)"; echo; echo "$graph_text"; echo; } >> "$out_file"
@@ -104,9 +115,10 @@ context_build() {
     fi
   fi
 
-  if context_research_enabled "$workspace" && research_needed "$task"; then
+  if context_research_enabled "$workspace" && research_needed "$task" \
+     && { ! command -v profile_external_enabled >/dev/null 2>&1 || profile_external_enabled "$workspace"; }; then
     local ext_max ext_text url
-    ext_max="$(policy_get "$_CTX_POLICY" external max_chars 10000)"
+    ext_max="$(_ctx_budget external max_chars 10000 external_max_chars)"
     url="$(printf '%s' "$task" | grep -oE 'https?://[^[:space:]]+' | head -1)"
     if [ -n "$url" ]; then
       ext_text="$(research_fetch_url "$url" "$ext_max" || true)"

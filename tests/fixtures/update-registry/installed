@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Deterministic stand-in for lib/inventory.sh's version detectors in P3
+# tests. Arg: <component>. Prints a version from an env var the test sets:
+#   INSTALLED_<sanitized-component>=<version>
+# Nothing set -> nothing printed (component treated as not installed).
+set -u
+comp="${1:-}"
+key="INSTALLED_$(printf '%s' "$comp" | tr -c 'A-Za-z0-9' '_')"
+printf '%s' "${!key:-}"

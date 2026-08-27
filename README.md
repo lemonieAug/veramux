@@ -8,17 +8,22 @@ projects.
 
 P0 was the minimum end-to-end loop; P1 added automatic context gathering
 (memory, code-structure graph, external research — all optional, all
-degrading gracefully) and risk-adaptive review depth. P2 (this version) is
-operational hardening, not a new agent layer: a durable run journal,
-structured events, a small run-state machine, timeouts/retries/
-cancellation, workspace locking, git-state safety, and recovery/resume —
-so `agent .` is something you can run daily and trust, without changing
-any of P0/P1's core guarantees. See
-[Operational hardening (P2)](#operational-hardening-p2) below. A
-dashboard, multi-user/SaaS, Kubernetes, a remote database, a custom UI, a
-generic plugin system, a required local model, and a custom embeddings/
-vector-DB stack remain explicitly out of scope — see
-[Future scope (P3+)](#future-scope-p3) at the bottom.
+degrading gracefully) and risk-adaptive review depth. P2 was operational
+hardening — a durable run journal, structured events, a small run-state
+machine, timeouts/retries/cancellation, workspace locking, git-state
+safety, recovery/resume. P3 (this version, **V1**) makes it maintainable
+for the long haul: a component inventory + compatibility manifest,
+capability probes, a discover → plan → stage → snapshot → apply →
+verify → keep-or-rollback upgrade cycle that never touches a critical
+component silently, deterministic quality/cost benchmarks, optimization
+profiles, backup/restore, and a reproducible release manifest — all with
+**zero** added LLM calls to a normal run. See
+[Operational hardening (P2)](#operational-hardening-p2) and
+[Maintenance and controlled upgrades (P3 / V1)](#maintenance-and-controlled-upgrades-p3--v1)
+below. A dashboard, multi-user/SaaS, Kubernetes, a remote database, a
+custom UI, a generic plugin system, a required local model, and a custom
+embeddings/vector-DB stack remain explicitly out of scope — see
+[Future scope (post-V1)](#future-scope-post-v1) at the bottom.
 
 ## Architecture
 
@@ -667,6 +672,138 @@ version drift — is local and deterministic. A normal run makes exactly the
 same Claude/Codex calls P1 made; P2 adds reliability around those calls,
 not more of them.
 
+## Maintenance and controlled upgrades (P3 / V1)
+
+P3 turns the stack into something you can run for months. Nothing critical
+(DeepSeek Harness, Claude Code, Codex, claude-mem, Graphify, Agent-Reach)
+ever updates silently. Every `agent update` verb except a deliberate
+`benchmark --live` makes **zero LLM calls**; `check`, `plan`, `inventory`,
+`backup`, and `release` make **zero changes** to the machine.
+
+### Inventory and compatibility
+
+`compat.yaml` records, per component: the tested version, where it comes
+from, whether it is CRITICAL to the Claude/Codex flow, the capabilities the
+stack depends on, and known migration/rollback concerns. `versions.yaml`
+stays the plain pin list.
+
+```sh
+agent inventory            # installed vs tested version + capability status per component
+```
+
+Status is `TESTED` / `SUPPORTED` (same major.minor) / `NEWER_UNTESTED` /
+`OLDER` / `MISSING`, and — with capability probes — `INCOMPATIBLE` when a
+required capability is *verifiably* absent (a probe that simply can't run
+without the real component is `unknown`, never a silent pass). Version
+tells you risk; a capability probe tells you whether it still works.
+
+### The upgrade cycle
+
+```
+agent update check            # what has a newer version (deterministic, no LLM)
+      ↓
+agent update plan <component>  # exact command, affected configs/skills, risk,
+                              # rollback strategy, migration concerns
+      ↓
+agent update apply <component> [--to <version>] [--yes]
+      │   snapshot config  →  stage the candidate in isolation  →
+      │   install the EXPLICIT version  →  verify the component  →
+      │   verify no P0/P1/P2/P3 regression
+      ↓
+UPDATE_SUCCESS                         (snapshot kept for rollback)
+   or UPDATE_FAILED_ROLLBACK_AVAILABLE:<snap>
+   or UPDATE_FAILED_ROLLBACK_PARTIAL:<snap>   (an irreversible data migration ran)
+      ↓
+agent update rollback [<snapshot-id>]  # restore config + reinstall pinned versions + verify
+```
+
+Risk is **deterministic**, not model-judged: any dsh / Claude / Codex
+update is HIGH; a claude-mem major is HIGH (possible irreversible storage
+migration); Graphify/Agent-Reach minors are MEDIUM; an unparseable version
+jump is HIGH; a candidate that can't be verified in isolation escalates one
+tier. `agent update apply` refuses to run non-interactively without
+`--yes`, refuses system components (upgrade Node/git via the OS), and — for
+a CRITICAL component — **stops the chain** rather than continuing blindly if
+verification fails.
+
+### Snapshots, rollback, and secrets
+
+A snapshot captures only configuration — this repo's `policies/` +
+manifests, the DSH profile *config* (never `node_modules`), non-secret
+claude-mem settings, skill files, and a version inventory. A file that
+holds a secret is recorded as a path + sha256 in `secrets-manifest.jsonl`,
+never copied. Rollback restores config and reinstalls the recorded
+versions, but **never overwrites a file that currently holds a secret** and
+is honest when it can't be complete: `ROLLBACK_PARTIAL` when a reinstall
+fails, verification fails, or the forward update was an irreversible
+migration.
+
+### Benchmarks and regression detection
+
+```sh
+agent benchmark --offline          # 8 fixtures (categories A-H), deterministic, ZERO quota
+agent benchmark --live             # runs each fixture through real Claude/Codex (explicit opt-in)
+agent benchmark compare <a> <b>    # flags regressions between two result files
+```
+
+Offline mode checks the parts the stack itself owns — risk classification,
+review routing, context-tool routing, and a config-driven context-budget
+footprint — against each fixture's expected characteristics. `compare`
+(thresholds in `policies/benchmark.yaml`) fails on: a fixture the baseline
+passed but the candidate doesn't, HIGH risk routed to skip review, an
+expected-LLM-call increase over the threshold, or a context-budget blow-up.
+A candidate that *shrinks* context is reported as an improvement.
+
+### Optimization profiles
+
+```sh
+agent --profile economy  "task"    # smaller budgets, no auto web research, MEDIUM review per policy
+agent --profile balanced "task"    # default — the P1 calibration
+agent --profile strict   "task"    # bigger budgets, MEDIUM always reviewed + verified
+```
+
+`.agent/config.yaml` can set a project default (`profile: strict`); an
+explicit `--profile` overrides it. **No profile ever weakens a HIGH-risk
+security review** — economy and strict both always send HIGH to Codex with
+verification.
+
+### Backup, release manifest, reproducible install
+
+```sh
+agent backup [--out <path>]         # portable stack-config archive (no secrets, no projects)
+agent restore <archive> [--yes]     # validate → show → preserve current secrets → restore → doctor
+agent release create <version>      # snapshot the whole stack into releases/<version>.yaml
+agent release verify [<version>]    # does THIS machine match that known-good combination?
+```
+
+A release manifest records every component version, the host runtimes it
+was tested on, the capability verdicts, and the benchmark outcome (it never
+fabricates a live-benchmark result). On a fresh VPS:
+
+```sh
+git clone <repo> && cd veramux
+scripts/install.sh --release 1.0.0   # pins dsh to the manifest's version;
+                                     # configure.sh + the printed steps handle the rest
+# authenticate Claude Code and Codex (see "Authentication" above)
+agent doctor
+agent release verify 1.0.0           # RELEASE_VERIFIED or RELEASE_MISMATCH with the exact drift
+```
+
+`--release` currently overrides only the `dsh` pin from the manifest; the
+subagent bundles follow `versions.yaml` and claude-mem / Graphify /
+Agent-Reach are installed through their own channels as the installer
+instructs. `agent release verify` is what actually confirms the whole
+machine matches — it compares every component version, the critical
+capability verdicts, and the offline benchmark, and names any mismatch.
+
+### claude-mem cost experiment (P3.15 — opt-in)
+
+`agent memexp report` records the current claude-mem compressor config
+(secrets redacted) and lays out cheaper directions to evaluate with a fixed
+10-fact / 10-query recall A/B (`agent memexp compare`). It **never** edits
+`~/.claude-mem/settings.json`, enables a gateway, or buys API access —
+switching providers stays a manual decision.
+
 ## Security
 
 - **Codex is read-only at the mechanism level, not just by prompt.** The
@@ -838,9 +975,11 @@ false`) — see [Operational hardening (P2)](#operational-hardening-p2).
   `git checkout --`, even with `--force` — a git conflict or an uncertain
   state it can't resolve safely is reported, not auto-fixed.
 
-## Future scope (P3+)
+## Future scope (post-V1)
 
-Explicitly deferred: a dashboard, multi-user/SaaS support, Kubernetes, a
+Now covered by P3: controlled component upgrades, rollback, quality/cost benchmarks, optimization profiles, backup/restore, and a reproducible release manifest.
+
+Still explicitly deferred: a dashboard, multi-user/SaaS support, Kubernetes, a
 remote database, a custom UI, a generic plugin/provider system, a required
 local model, a custom embeddings/vector-DB stack, budget-escalation rounds
 beyond one context package per run, `.agent/config.yaml` schema

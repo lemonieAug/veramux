@@ -1,0 +1,10 @@
+id: trivial-doc-typo
+category: A
+description: "category A fixture"
+expected_risk: low
+expected_review: skip
+expected_tools: none
+changed_paths: README.md
+always_review: 0
+planted_bug: false
+live_only_checks: none

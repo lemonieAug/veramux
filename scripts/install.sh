@@ -12,6 +12,30 @@ source "$ROOT_DIR/lib/environment.sh"
 
 DSH_VERSION="$(grep -A2 '^deepseek_harness:' "$ROOT_DIR/versions.yaml" | grep 'tested_version:' | sed -E 's/.*"([^"]+)".*/\1/')"
 
+# P3.16: `scripts/install.sh --release <version>` pins every component to
+# what releases/<version>.yaml recorded (reproducible install on a new VPS).
+AGENT_RELEASE=""
+_args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --release) AGENT_RELEASE="${2:-}"; shift 2 ;;
+    --release=*) AGENT_RELEASE="${1#--release=}"; shift ;;
+    *) _args+=("$1"); shift ;;
+  esac
+done
+set -- "${_args[@]+"${_args[@]}"}"
+if [ -n "$AGENT_RELEASE" ]; then
+  RELEASE_FILE="$ROOT_DIR/releases/$AGENT_RELEASE.yaml"
+  if [ ! -f "$RELEASE_FILE" ]; then
+    echo "error: no such release manifest: $RELEASE_FILE" >&2
+    exit 1
+  fi
+  _rel_dsh="$(awk '/^  deepseek-harness:/{gsub(/[" ]/,"",$2);print $2}' "$RELEASE_FILE")"
+  [ -n "$_rel_dsh" ] && [ "$_rel_dsh" != "MISSING" ] && DSH_VERSION="$_rel_dsh"
+  echo "installing per release manifest $AGENT_RELEASE (dsh $DSH_VERSION)"
+  export AGENT_RELEASE
+fi
+
 say() { echo "$@"; }
 warn() { echo "warning: $*" >&2; }
 fail() { echo "error: $*" >&2; exit 1; }

@@ -650,3 +650,141 @@ Confirmed real, existing packages (`packages/jobs`, `packages/workflow`,
   about being heuristic for this subset of categories, deterministic for
   everything else (exit codes, our own timeout signal, validation/review
   outcomes, lock conflicts, git-state checks).
+
+## P3 discovery: maintenance, controlled upgrades, rollback
+
+Discovery for the P3 milestone (turn the stack into a maintainable V1).
+Method: same as P0-P2 — query the real registries/CLIs, read the real
+upstream docs, do not trust old command names. All discovery here is
+deterministic (registry lookups, `--version`, `--help`) and used **zero**
+LLM calls.
+
+### Baseline (2026-08-27, commit `59ddee2`, this dev checkout)
+
+`dsh` / Graphify / Agent-Reach are **not installed on this dev box** — P3's
+machinery is built and tested against mocks at the package-manager boundary
+plus fake candidate packages and local fixtures (see the P3 spec's safety
+rule). Real updates are only ever run on the VPS, explicitly.
+
+Installed here: node 22.23.2, npm 10.9.8, pnpm 11.7.0, bun 1.4.0, python
+3.13.1, uv 0.12.5, git 2.49.0, host `claude` 2.1.246, host `codex` 0.149.1,
+`claude-mem` 13.16.0.
+
+### Per-component update mechanism
+
+Final implementation (`compat.yaml` + `lib/inventory.sh` +
+`lib/update_discovery.sh`). Note the **bundle-vs-payload** decision made in
+PHASE 4: for Claude Code and Codex the *unit we pin, detect, and update* is
+the DSH subagent **bundle** (whose version tracks dsh's own scheme —
+`latest` = `0.0.1-rc.1`, `next` = `0.1.1-rc.2`), NOT the transitive Claude
+Agent SDK / Codex wrapper version. The SDK/wrapper version is a secondary
+"detail" probe (`inventory_detail_version`, reusing P2's
+`version_drift_installed_claude_agent_sdk` / `..._codex_wrapper`).
+
+| Component | Source (`compat.yaml`) | Installed-version probe | Available-version probe | Update command (VPS, explicit) | Rollback |
+|---|---|---|---|---|---|
+| DeepSeek Harness | `npm:@deepseek-ai/dsh`, channel `next` | `dsh --version` | `npm view @deepseek-ai/dsh dist-tags.next` (falls back to `version`) | `npm i -g @deepseek-ai/dsh@<v>` | reinstall pinned `@<old>`; config snapshot restore |
+| Claude Code | `bundle:@deepseek-ai/dsh-subagent-claude-code`, channel `next` | read `<dsh_home>/profiles/lead/node_modules/@deepseek-ai/dsh-subagent-claude-code/package.json` `version` (the BUNDLE, not the SDK) | `npm view @deepseek-ai/dsh-subagent-claude-code dist-tags.next` | `dsh plugin --profile lead add @deepseek-ai/dsh-subagent-claude-code@<v>` | re-add pinned `@<old>` |
+| Codex | `bundle:@deepseek-ai/dsh-subagent-codex`, channel `next` | read `<dsh_home>/profiles/reviewer/node_modules/@deepseek-ai/dsh-subagent-codex/package.json` `version` | `npm view @deepseek-ai/dsh-subagent-codex dist-tags.next` | `dsh plugin --profile reviewer add ...@<v>` | re-add pinned `@<old>` |
+| claude-mem | `npm:claude-mem` (global) + `npx claude-mem install` (plugin) | `claude-mem --version` | `npm view claude-mem version` | `npm i -g claude-mem@<v> && npx claude-mem@<v> install` | reinstall pinned; **never delete `~/.claude-mem/`** — snapshot settings first |
+| Graphify | `pypi:graphifyy` (uv tool / pipx) + `graphify install` (skills) | `graphify --version` | `curl -s https://pypi.org/pypi/graphifyy/json` → `.info.version` | `uv tool install graphifyy==<v>` then re-run `graphify install` and **verify skill landed where the stack expects** | `uv tool install graphifyy==<old>` |
+| Agent-Reach | `npm:agent-reach` | `agent-reach --version` | `agent-reach check-update` (preferred; parsed) else `npm view agent-reach version` | per `agent-reach`'s own upgrade guidance | reinstall pinned |
+| node / pnpm / bun / uv / python / git | `system` | `<tool> --version` | none — `agent update` reports these via inventory but never upgrades them; the OS owns them | n/a | OS package manager |
+
+`agent update apply` builds the command from the source scheme:
+`npm:` → `npm install -g <pkg>@<v>`; `bundle:` → `dsh plugin --profile
+<lead|reviewer> add <pkg>@<v>`; `pypi:graphify` → `uv tool install
+graphifyy==<v> && graphify install`.
+
+Registry snapshot 2026-08-27: `@deepseek-ai/dsh` `next`=0.1.1-rc.2 (== tested),
+both subagent bundles `next`=0.1.1-rc.2, `claude-mem` 13.16.1 (installed
+13.16.0 → patch update available), `@anthropic-ai/claude-code` 2.1.247,
+`@openai/codex` 0.150.1, `agent-reach` (npm) 0.3.4, `graphifyy` 0.9.50
+(== P1 tested).
+
+**Discrepancy to verify on the VPS:** the P1 discovery table lists
+Agent-Reach at repo version `1.5.0` (`Panniantong/Agent-Reach`), but the
+npm package `agent-reach` is at `0.3.4`. Either the npm package is a
+different distribution or the P1 note used the GitHub tag scheme. `agent
+update` treats Agent-Reach as `staging_not_available` + elevated risk until
+this is pinned down.
+
+### Capability probes (capability > version, per the P3 spec)
+
+Version tells you *risk*; a capability probe tells you whether it still
+*works*. The list below is the **design target**; `lib/capability_probe.sh`
+is authoritative for what actually shipped. Each shipped probe returns
+`pass` / `fail` / `unknown`, and **only `fail`** (a capability verifiably
+absent) makes a component `INCOMPATIBLE` — anything that needs the real
+component or a live provider call is `unknown`, never a silent pass. In
+particular `lead-session-starts` / `reviewer-session-starts` and
+`cwd-propagation` are `unknown` until a `benchmark --live` run; the shipped
+`claude-code-subagent` / `codex-subagent` probes check the profile
+`package.json` for the bundle (via `env_profile_has_bundle`), `code-mode`
+greps `dsh --help`, and the read-only probes check the reviewer
+`cordis.patch.yml` rows + `codex-home/config.toml sandbox_mode`.
+
+Design target, per component (all deterministic, no LLM, no quota):
+
+- **DeepSeek Harness** (CRITICAL): `dsh --help` lists the `claude` and
+  `codex` subagent profiles; `dsh profile list` (or config read) shows lead
+  + reviewer configured; Code Mode present in `dsh --help`; our
+  `harness/*` config still parses; reviewer profile still carries the
+  read-only `cordis.patch.yml`. A missing CRITICAL capability **fails** an
+  update.
+- **Claude Code bundle**: lead profile `node_modules` resolves
+  `@anthropic-ai/claude-agent-sdk` + its platform CLI; `dsh --profile lead
+  --help` (or a dry `--version`-style call) starts without an auth/config
+  error.
+- **Codex bundle**: reviewer profile resolves `@openai/codex`; starts;
+  read-only patch policy still applied.
+- **claude-mem**: `claude-mem --version` works; worker health endpoint
+  (`http://127.0.0.1:3777x`) responds OR is expected-down; MCP search tools
+  enumerable; `~/.claude-mem/settings.json` parses; storage dir intact.
+- **Graphify**: `graphify --version`; `graphify query --help` still exposes
+  the subcommand the stack uses; the installed `SKILL.md` is at the path
+  `harness`/Claude expects (historically drifted across platforms — verify
+  the real file, don't trust the installer exit code).
+- **Agent-Reach**: `agent-reach doctor` (diagnostic only — do **not** assume
+  it installs/refreshes skills); `SKILL.md` present; no new channels
+  silently enabled; cookies untouched.
+
+### Rollback considerations per component
+
+- **npm-sourced** (dsh, both bundles, claude-mem, agent-reach): fully
+  reversible by reinstalling the pinned older version — provided the config
+  snapshot is restored too.
+- **claude-mem storage**: a claude-mem major upgrade may run an irreversible
+  data migration on `~/.claude-mem/`. Detect the version jump, snapshot
+  `settings.json` (no secrets) + record a checksum/inventory of the storage
+  dir, and mark the update **HIGH risk / rollback-partial** — never promise
+  a clean rollback of migrated data.
+- **Graphify skills**: `graphify install` rewrites `SKILL.md` / `CLAUDE.md` /
+  hooks. Snapshot those files; rollback restores them.
+- **Agent-Reach**: skill refresh is explicit; rollback restores the snapshot
+  `SKILL.md` + config.
+- **system runtimes** (node/pnpm/uv/git): out of `agent update`'s scope —
+  inventory reports drift, the operator upgrades via the OS.
+
+### What P3 will NOT build
+
+- No SaaS updater, no remote management, no auto-update daemon, no custom
+  package registry / generic dependency manager, no distributed rollout.
+- No model-based changelog analysis in the default path (release notes are
+  *presented*, not interpreted by an LLM). Optional model analysis may be
+  added later, opt-in.
+- No giant benchmarking framework — 6-10 stable fixtures, an offline
+  deterministic mode and an explicit `--live` mode.
+- No automatic provider switch for claude-mem (P3.15 is an opt-in
+  experiment that only ever *recommends*).
+
+### What P3 builds (confirmed genuinely ours)
+
+`lib/inventory.sh`, `compat.yaml` + `lib/compat.sh`,
+`lib/capability_probe.sh`, `lib/update_discovery.sh`, `lib/update_plan.sh`,
+`lib/update_stage.sh`, `lib/migration_detect.sh`, `lib/snapshot.sh`,
+`lib/update_apply.sh`, `lib/update_verify.sh`, `lib/rollback.sh`,
+`lib/benchmark.sh` (extends the P1.16 `scripts/benchmark.sh`),
+`policies/profiles.yaml` + `lib/profiles.sh`, `lib/backup.sh`,
+`lib/release.sh` + `releases/*.yaml`, and the `agent update|benchmark|
+backup|restore` CLI verbs.

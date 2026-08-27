@@ -1,0 +1,35 @@
+# P3.14: optimization profiles. Three presets that re-tune the P1 context
+# budgets and the review-depth knobs WITHOUT changing models and WITHOUT
+# ever weakening a HIGH-risk security review. Selected with
+# `agent --profile <name>` or a project `.agent/config.yaml` `profile:` key;
+# default is `balanced`.
+#
+# Only the keys listed here are overridable. An omitted key = use the P1
+# default from policies/context.yaml / policies/risk.yaml. `balanced` is
+# intentionally empty (it IS the P1 calibration).
+#
+# Parsed by lib/profiles.sh with lib/policy.sh (section = profile name).
+
+# ECONOMY — minimum spend that still respects every safety boundary.
+economy:
+  memory_max_chars: 2000
+  graph_max_chars: 4000
+  source_initial_max_chars: 18000
+  external_enabled: false          # no automatic web research
+  review_low_codex: false          # (same as default)
+  review_medium_codex: policy      # MEDIUM -> Codex only when a policy/override demands it
+  review_high_codex: true          # HIGH -> ALWAYS reviewed (never negotiable)
+  review_high_verification: true
+
+# BALANCED — the P1 calibration. Deliberately empty.
+balanced: {}
+
+# STRICT — for changes you want maximum scrutiny on.
+strict:
+  memory_max_chars: 6000
+  graph_max_chars: 12000
+  source_initial_max_chars: 40000
+  external_enabled: true
+  review_medium_codex: true
+  review_medium_verification: true
+  review_high_verification: true

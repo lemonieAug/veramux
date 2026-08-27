@@ -97,9 +97,21 @@ risk_review_setting() {
 }
 
 risk_requires_codex() {
+  # A P3 optimization profile (lib/profiles.sh, only present on a real
+  # `agent` run) can make a tier "always" reviewed — never LESS than the
+  # policy. HIGH is always "always". `economy` uses "policy" for MEDIUM,
+  # which is exactly the policy default, so nothing weakens here.
+  if command -v profile_review_codex >/dev/null 2>&1; then
+    case "$(profile_review_codex "$1")" in
+      always) return 0 ;;
+    esac
+  fi
   [ "$(risk_review_setting "$1" codex)" = "true" ]
 }
 
 risk_requires_verification() {
+  if command -v profile_review_verification >/dev/null 2>&1 && profile_review_verification "$1"; then
+    return 0
+  fi
   [ "$(risk_review_setting "$1" verification)" = "true" ]
 }

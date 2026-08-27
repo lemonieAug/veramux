@@ -1,0 +1,10 @@
+id: notification-refactor-cont
+category: G
+description: "category G fixture"
+expected_risk: medium
+expected_review: review
+expected_tools: memory
+changed_paths: src/notify.js
+always_review: 0
+planted_bug: false
+live_only_checks: none

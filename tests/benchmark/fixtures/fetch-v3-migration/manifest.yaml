@@ -1,0 +1,10 @@
+id: fetch-v3-migration
+category: F
+description: "category F fixture"
+expected_risk: medium
+expected_review: review
+expected_tools: research
+changed_paths: src/http.js
+always_review: 0
+planted_bug: false
+live_only_checks: none

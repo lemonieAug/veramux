@@ -1,0 +1,10 @@
+Where does the project deploy?	Hetzner|Falkenstein|VPS
+What keeps the Codex reviewer read-only?	cordis.patch.yml|read-only
+Where are run journals stored?	.local/state/agent-stack|runs
+What caps the correction loop?	max_correction_rounds|orchestration.yaml
+What is Graphify's PyPI package name?	graphifyy
+What port does the claude-mem worker use?	3777
+Does the lead use a host claude CLI?	bundle|Agent SDK|not a host
+What review do HIGH-risk changes get?	verification|Codex
+Does offline benchmark spend quota?	zero|no quota
+What happens to secret-shaped fields in journals?	rejected|not written

@@ -26,6 +26,14 @@ state_runs_root_dir() { printf '%s/runs\n' "$(state_root_dir)"; }
 state_locks_dir() { printf '%s/locks\n' "$(state_root_dir)"; }
 state_projects_dir() { printf '%s/projects\n' "$(state_root_dir)"; }
 
+# P3: maintenance state — pre-update config snapshots (P3.8), user backups
+# (P3.18), isolated update staging areas (P3.6), and benchmark results
+# (P3.12/P3.13). All under the same state root, never inside a target repo.
+state_snapshots_dir() { printf '%s/snapshots\n' "$(state_root_dir)"; }
+state_backups_dir() { printf '%s/backups\n' "$(state_root_dir)"; }
+state_staging_dir() { printf '%s/staging\n' "$(state_root_dir)"; }
+state_benchmark_dir() { printf '%s/benchmark\n' "$(state_root_dir)"; }
+
 # state_project_root <workspace>
 # The stable root a project-id is derived from: a git repo's toplevel (so
 # running from a subdirectory still maps to the same project), or the

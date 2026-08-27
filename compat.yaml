@@ -1,0 +1,180 @@
+# P3 compatibility manifest.
+#
+# versions.yaml holds the plain "what we pinned" list and stays the source
+# of truth for install/configure. THIS file adds the compatibility layer on
+# top: for each component, the tested version, where it comes from, whether
+# it is CRITICAL to the Claude/Codex flow, the capabilities our stack
+# depends on, and known migration/rollback concerns.
+#
+# Parsed by lib/compat.sh with lib/policy.sh's small readers, so the shape
+# is deliberately flat: one top-level "section:" per component, 2-space
+# "key: value" lines, and lists as "  key:" followed by "    - item".
+#
+# Status vocabulary (lib/compat.sh compat_status):
+#   TESTED         installed == tested
+#   SUPPORTED      installed differs only in patch/build from tested, same major.minor
+#   NEWER_UNTESTED installed is newer than tested (works may or may not hold — probe)
+#   OLDER          installed is older than tested
+#   INCOMPATIBLE   a required capability probe failed (set by lib/capability_probe.sh, not by version)
+#   MISSING        not installed
+#
+# We never invent a version range we have not actually tested. "SUPPORTED"
+# is a narrow same-major.minor allowance, not a promise about arbitrary
+# newer releases — those are NEWER_UNTESTED until a benchmark + probe run
+# says otherwise and this file is updated.
+
+schema_version: 1
+
+deepseek-harness:
+  tested: "0.1.1-rc.2"
+  source: "npm:@deepseek-ai/dsh"
+  channel: "next"
+  scope: "global"
+  critical: true
+  version_probe: "dsh --version"
+  registry_probe: "npm view @deepseek-ai/dsh dist-tags"
+  required_capabilities:
+    - claude-code-subagent
+    - codex-subagent
+    - code-mode
+    - reviewer-read-only
+    - cwd-propagation
+  migration_notes: "Developer preview; upstream warns of breaking changes between releases. Re-run docs/upstream-findings.md discovery before upgrading."
+  rollback: "reinstall the pinned older version globally; restore the harness/ config snapshot."
+
+claude-code:
+  tested: "0.1.1-rc.2"
+  source: "bundle:@deepseek-ai/dsh-subagent-claude-code"
+  channel: "next"
+  scope: "profile:lead"
+  critical: true
+  sdk_tested: "0.3.220"
+  cli_tested: "2.1.220"
+  version_probe: "read <dsh_home>/profiles/lead/node_modules/@deepseek-ai/dsh-subagent-claude-code/package.json"
+  registry_probe: "npm view @deepseek-ai/dsh-subagent-claude-code dist-tags"
+  required_capabilities:
+    - lead-session-starts
+    - native-settings-authoritative
+  migration_notes: "The bundle version tracks dsh's own version scheme (latest=0.0.1-rc.1, next=0.1.1-rc.2), NOT the transitive Claude Agent SDK version (sdk_tested). Never install a separate host claude CLI for the integration."
+  rollback: "dsh plugin --profile lead add @deepseek-ai/dsh-subagent-claude-code@<old>."
+
+codex:
+  tested: "0.1.1-rc.2"
+  source: "bundle:@deepseek-ai/dsh-subagent-codex"
+  channel: "next"
+  scope: "profile:reviewer"
+  critical: true
+  wrapper_tested: "0.147.0"
+  version_probe: "read <dsh_home>/profiles/reviewer/node_modules/@deepseek-ai/dsh-subagent-codex/package.json"
+  registry_probe: "npm view @deepseek-ai/dsh-subagent-codex dist-tags"
+  required_capabilities:
+    - reviewer-session-starts
+    - reviewer-read-only-patch-policy
+  migration_notes: "A Codex auth/backend change is HIGH risk — verify the ChatGPT subscription login still works and no OPENAI_API_KEY fallback is introduced."
+  rollback: "dsh plugin --profile reviewer add @deepseek-ai/dsh-subagent-codex@<old>."
+
+claude-mem:
+  tested: "13.16.0"
+  source: "npm:claude-mem"
+  scope: "global+plugin"
+  critical: false
+  version_probe: "claude-mem --version"
+  registry_probe: "npm view claude-mem version"
+  required_capabilities:
+    - mcp-search-tools
+    - session-start-injection
+    - worker-health
+  migration_notes: "A major upgrade may run an irreversible data migration on ~/.claude-mem/. NEVER delete that directory. Snapshot settings.json (no secrets) and checksum the storage dir before applying; mark such an update HIGH risk / rollback-partial."
+  rollback: "reinstall the pinned version and re-run its install; restore settings.json. Migrated storage data may not be reversible."
+
+graphify:
+  tested: "0.9.50"
+  source: "pypi:graphifyy"
+  scope: "uv-tool+skill"
+  critical: false
+  version_probe: "graphify --version"
+  registry_probe: "curl -s https://pypi.org/pypi/graphifyy/json"
+  required_capabilities:
+    - query-subcommand
+    - skill-installed-where-expected
+  migration_notes: "graphify install rewrites SKILL.md / CLAUDE.md / hooks and has historically placed skills in platform-dependent locations. After an upgrade, verify the real skill file path — do not trust the installer exit code."
+  rollback: "uv tool install graphifyy==<old>; restore the snapshot SKILL.md / CLAUDE.md / hook files."
+
+agent-reach:
+  tested: "0.3.4"
+  source: "npm:agent-reach"
+  scope: "global+skill"
+  critical: false
+  version_probe: "agent-reach --version"
+  registry_probe: "agent-reach check-update"
+  required_capabilities:
+    - doctor-command
+    - skill-present
+  migration_notes: "P1 discovery referenced repo v1.5.0 but the npm package agent-reach is at 0.3.4 — verify which distribution the VPS uses before trusting any range. Do not assume agent-reach doctor installs/refreshes skills. Never auto-enable new channels; never touch cookies."
+  rollback: "reinstall the pinned version; restore the snapshot SKILL.md + config."
+
+node:
+  tested: "22.23.2"
+  source: "system"
+  scope: "system"
+  critical: true
+  version_probe: "node --version"
+  registry_probe: ""
+  required_capabilities: []
+  migration_notes: "versions.yaml requires >=22.19.0 (also supports >=24). Out of `agent update` scope — inventory reports drift, the operator upgrades via the OS."
+  rollback: "OS package manager."
+
+pnpm:
+  tested: "11.7.0"
+  source: "system"
+  scope: "system"
+  critical: false
+  version_probe: "pnpm --version"
+  registry_probe: ""
+  required_capabilities: []
+  migration_notes: "Needed for `dsh plugin --profile <name> add/remove`. Out of `agent update` scope."
+  rollback: "OS / corepack."
+
+bun:
+  tested: "1.4.0"
+  source: "system"
+  scope: "system"
+  critical: false
+  version_probe: "bun --version"
+  registry_probe: ""
+  required_capabilities: []
+  migration_notes: "Only used when a target project's lockfile is bun.lock*. Out of `agent update` scope."
+  rollback: "bun upgrade --revert / OS."
+
+python:
+  tested: "3.13.1"
+  source: "system"
+  scope: "system"
+  critical: false
+  version_probe: "python --version"
+  registry_probe: ""
+  required_capabilities: []
+  migration_notes: "Only needed by Graphify. Out of `agent update` scope."
+  rollback: "OS package manager."
+
+uv:
+  tested: "0.12.5"
+  source: "system"
+  scope: "system"
+  critical: false
+  version_probe: "uv --version"
+  registry_probe: ""
+  required_capabilities: []
+  migration_notes: "Used to install/upgrade Graphify in an isolated tool environment. Out of `agent update` scope."
+  rollback: "uv self / OS."
+
+git:
+  tested: "2.49.0"
+  source: "system"
+  scope: "system"
+  critical: true
+  version_probe: "git --version"
+  registry_probe: ""
+  required_capabilities: []
+  migration_notes: "Core dependency for diff/status-based review and P2 git safety. Out of `agent update` scope."
+  rollback: "OS package manager."

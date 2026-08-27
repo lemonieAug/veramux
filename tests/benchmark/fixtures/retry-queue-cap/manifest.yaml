@@ -1,0 +1,10 @@
+id: retry-queue-cap
+category: D
+description: "category D fixture"
+expected_risk: medium
+expected_review: review
+expected_tools: graph
+changed_paths: src/retry.js
+always_review: 0
+planted_bug: false
+live_only_checks: none

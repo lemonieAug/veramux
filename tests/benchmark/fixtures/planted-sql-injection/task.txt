@@ -1,0 +1,1 @@
+Add a helper findUserByEmail(email) to the users module.

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Deterministic stand-in for `npm view` / PyPI lookups in P3.4+ tests.
+# Args: <scheme> <pkg> [channel]. Prints a version, or nothing to simulate
+# an unreachable registry. Controlled by env vars the test sets:
+#   FIXTURE_<sanitized-pkg>=<version>            answer for any channel
+#   FIXTURE_<sanitized-pkg>__<channel>=<version> answer for one dist-tag
+#   FIXTURE_UNREACHABLE=1                         every lookup returns nothing
+set -u
+
+[ "${FIXTURE_UNREACHABLE:-0}" = "1" ] && exit 0
+
+pkg="${2:-}"
+channel="${3:-latest}"
+san="$(printf '%s' "$pkg" | tr -c 'A-Za-z0-9' '_')"
+
+chan_key="FIXTURE_${san}__${channel}"
+[ -n "${!chan_key:-}" ] && { printf '%s' "${!chan_key}"; exit 0; }
+
+plain_key="FIXTURE_${san}"
+[ -n "${!plain_key:-}" ] && { printf '%s' "${!plain_key}"; exit 0; }
+
+exit 0

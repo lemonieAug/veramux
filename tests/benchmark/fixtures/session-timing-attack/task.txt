@@ -1,0 +1,1 @@
+Harden the session token comparison in auth/session.js against timing attacks (use a constant-time compare).

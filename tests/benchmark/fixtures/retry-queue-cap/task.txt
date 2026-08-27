@@ -1,0 +1,1 @@
+Where is the retry logic and how does it interact with the job queue? Add a configurable max-attempts cap.

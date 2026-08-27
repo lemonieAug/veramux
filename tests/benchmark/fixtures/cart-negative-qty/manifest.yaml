@@ -1,0 +1,10 @@
+id: cart-negative-qty
+category: B
+description: "category B fixture"
+expected_risk: medium
+expected_review: review
+expected_tools: none
+changed_paths: src/cart.js
+always_review: 0
+planted_bug: false
+live_only_checks: none

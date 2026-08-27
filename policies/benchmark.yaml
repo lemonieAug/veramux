@@ -1,0 +1,19 @@
+# P3.12/P3.13: quality + token/context regression thresholds for
+# `agent benchmark`. Small line-based file (lib/policy.sh). These are
+# guardrails, not absolutes — tune them, don't treat them as physics. A
+# candidate config/update that trips one of these is FLAGGED, not
+# auto-rejected; the operator decides.
+
+thresholds:
+  # A candidate may not increase the expected LLM-call count for a fixture
+  # by more than this fraction without an explicit justification.
+  max_llm_call_increase_pct: 20
+  # ...nor the deterministic context-budget footprint by more than this.
+  max_context_increase_pct: 25
+
+invariants:
+  # These are hard — a candidate that breaks one FAILS the benchmark.
+  high_risk_must_be_reviewed: true
+  reviewer_must_stay_read_only: true
+  no_fixture_regression: true          # a fixture the baseline passed must still pass
+  no_paid_api_fallback: true

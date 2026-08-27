@@ -1,0 +1,10 @@
+id: discount-tax-bug
+category: C
+description: "category C fixture"
+expected_risk: medium
+expected_review: review
+expected_tools: none
+changed_paths: src/cart.js,src/pricing.js
+always_review: 0
+planted_bug: false
+live_only_checks: none

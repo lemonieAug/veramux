@@ -1,0 +1,10 @@
+id: planted-sql-injection
+category: H
+description: "category H fixture"
+expected_risk: medium
+expected_review: review
+expected_tools: none
+changed_paths: src/users.js
+always_review: 0
+planted_bug: true
+live_only_checks: reviewer_catches_planted_bug
