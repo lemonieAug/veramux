@@ -50,6 +50,18 @@ orchestrate_call_dsh_tracked() {
   timeout_s="${!override_var:-$(policy_get "$_ORCH_RUNTIME_POLICY" timeouts "$timeout_kind" 600)}"
   grace_s="${AGENT_TIMEOUT_OVERRIDE_GRACE:-$(policy_get_toplevel "$_ORCH_RUNTIME_POLICY" timeout_grace_seconds 10)}"
   max_attempts="$(retry_max_attempts transient)"
+  local message_bytes
+  message_bytes="$(wc -c < "$message_file")"
+
+  # DSH headless receives the task as a single argv argument.
+  # Keep a safe margin below Linux's per-argument limit.
+  if [ "$message_bytes" -gt 100000 ]; then
+    printf 'DSH prompt too large for argv: %s bytes (limit: 100000)\n' \
+      "$message_bytes" > "$out_file"
+    ORCHESTRATE_LAST_FAILURE_CATEGORY="INTERNAL"
+    return 1
+  fi
+
   message="$(cat "$message_file")"
 
   while :; do
