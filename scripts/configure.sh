@@ -22,7 +22,7 @@ require_dsh() {
 
 setup_lead_profile() {
   echo "== configuring profile: lead =="
-  dsh plugin --profile lead add '@deepseek-ai/dsh-headless' '@deepseek-ai/dsh-subagent-claude-code'
+  dsh plugin --profile lead add '@deepseek-ai/dsh-headless@0.1.1-rc.2' '@deepseek-ai/dsh-subagent-claude-code@0.1.1-rc.2'
 
   local profile_dir="$DSH_HOME_DIR/profiles/lead"
   mkdir -p "$profile_dir"
@@ -32,7 +32,7 @@ setup_lead_profile() {
 
 setup_reviewer_profile() {
   echo "== configuring profile: reviewer =="
-  dsh plugin --profile reviewer add '@deepseek-ai/dsh-headless' '@deepseek-ai/dsh-subagent-codex'
+  dsh plugin --profile reviewer add '@deepseek-ai/dsh-headless@0.1.1-rc.2' '@deepseek-ai/dsh-subagent-codex@0.1.1-rc.2'
 
   local profile_dir="$DSH_HOME_DIR/profiles/reviewer"
   local codex_home="$profile_dir/codex-home"

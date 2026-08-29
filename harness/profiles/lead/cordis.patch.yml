@@ -34,13 +34,14 @@
     providerName: claude-code
     permissionMode: acceptEdits
 
-- id: tool-subagent-claude-code
-  name: '@deepseek-ai/dsh-tool-subagent'
-  config:
-    provider: claude-code
-    toolName: subagent_claude_code
-    backgroundMode: one-shot
-    maxDepth: provider-managed
+- insert:
+    - id: tool-subagent-claude-code
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: claude-code
+        toolName: subagent_claude_code
+        backgroundMode: one-shot
+        maxDepth: provider-managed
 
 # Remove dsh-base's generic native tools so this profile's own model cannot
 # bypass Claude Code and act on the filesystem/shell directly. Each id below
