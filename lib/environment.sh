@@ -37,6 +37,44 @@ env_dsh_ok() {
   env_has_cmd dsh
 }
 
+# Presence-only lookup for a named variable in a DSH .env file. This parser
+# never sources the file (which would execute shell code), and never prints a
+# value. DSH's credential service performs the real per-request resolution.
+env_file_var_configured() {
+  local file="$1" name="$2"
+  [ -f "$file" ] || return 1
+  awk -v wanted="$name" '
+    {
+      line=$0
+      sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+      eq=index(line, "=")
+      if (!eq) next
+      key=substr(line, 1, eq-1)
+      value=substr(line, eq+1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      if (key == wanted && value != "" && value !~ /^#/) found=1
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
+env_orchestrator_deepseek_configured() {
+  local env_file="${1:-}"
+  [ -n "${VERAMUX_DEEPSEEK_API_KEY:-}" ] || { [ -n "$env_file" ] && env_file_var_configured "$env_file" VERAMUX_DEEPSEEK_API_KEY; }
+}
+
+# This optional fallback key belongs only to DSH's relay model. It
+# intentionally differs from OPENAI_API_KEY, which a host Codex CLI may
+# interpret as an API-billing override. Profiles never forward it to Codex.
+env_orchestrator_openai_configured() {
+  local env_file="${1:-}"
+  [ -n "${VERAMUX_OPENAI_API_KEY:-}" ] || { [ -n "$env_file" ] && env_file_var_configured "$env_file" VERAMUX_OPENAI_API_KEY; }
+}
+
+env_orchestrator_deepseek_model() { printf '%s\n' "${VERAMUX_DEEPSEEK_MODEL:-deepseek-chat}"; }
+env_orchestrator_openai_model() { printf '%s\n' "${VERAMUX_OPENAI_MODEL:-gpt-5-mini}"; }
+
 # Presence-only check for the two products' subagent runtimes inside a
 # given DSH profile directory. Returns 0 if the bundle is listed.
 env_profile_has_bundle() {
@@ -80,7 +118,10 @@ env_scan_profiles_for_hardcoded_keys() {
   local hit=0
   local f
   while IFS= read -r -d '' f; do
-    if grep -qE 'ANTHROPIC_API_KEY|OPENAI_API_KEY' "$f" 2>/dev/null; then
+    # Dedicated relay references such as VERAMUX_OPENAI_API_KEY are allowed;
+    # only the generic child-billing variable names as standalone identifiers
+    # are forbidden here.
+    if grep -qE '(^|[^A-Z0-9_])(ANTHROPIC_API_KEY|OPENAI_API_KEY)([^A-Z0-9_]|$)' "$f" 2>/dev/null; then
       echo "ERROR: $f explicitly references ANTHROPIC_API_KEY or OPENAI_API_KEY."
       echo "  A subagent provider's 'env:' block only receives credentials we put"
       echo "  there ourselves; DeepSeek Harness does not forward ambient keys."

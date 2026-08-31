@@ -16,4 +16,4 @@ invariants:
   high_risk_must_be_reviewed: true
   reviewer_must_stay_read_only: true
   no_fixture_regression: true          # a fixture the baseline passed must still pass
-  no_paid_api_fallback: true
+  no_child_api_key_fallback: true       # relay fallback is separate from Claude/Codex auth

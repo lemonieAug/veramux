@@ -26,7 +26,9 @@ failure_classify_exit_code() {
   case "$1" in
     124) printf 'TIMEOUT\n' ;;
     130) printf 'CANCELLED\n' ;;
-    137) printf 'CANCELLED\n' ;;
+    # A cancellation request is checked before this classifier. Without that
+    # marker, 137 is the timeout wrapper's TERM->KILL escalation outcome.
+    137) printf 'TIMEOUT\n' ;;
     *) printf '\n' ;;
   esac
 }
@@ -53,7 +55,7 @@ failure_classify_text() {
       printf 'AUTHENTICATION\n'; return 0 ;;
   esac
   case "$text" in
-    *"econnrefused"*|*"enotfound"*|*"getaddrinfo"*|*"503"*|*"service unavailable"*|*"could not connect"*)
+    *"econnrefused"*|*"econnreset"*|*"enotfound"*|*"etimedout"*|*"getaddrinfo"*|*"502"*|*"503"*|*"504"*|*"service unavailable"*|*"temporarily unavailable"*|*"could not connect"*|*"network error"*)
       printf 'PROVIDER_UNAVAILABLE\n'; return 0 ;;
   esac
   printf '\n'
@@ -95,7 +97,7 @@ failure_classify() {
 # workspace/git conflicts — must never be retried silently.
 failure_is_retryable() {
   case "$1" in
-    RATE_LIMIT|PROVIDER_UNAVAILABLE|MALFORMED_OUTPUT) return 0 ;;
+    RATE_LIMIT|PROVIDER_UNAVAILABLE|TIMEOUT|MALFORMED_OUTPUT) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -106,8 +108,9 @@ failure_is_retryable() {
 # own list).
 failure_result_json() {
   local category="$1" phase="$2" message="$3" run_id="$4" retryable="false"
+  shift 4
   failure_is_retryable "$category" && retryable="true"
   node "$(dirname "${BASH_SOURCE[0]}")/json-tools.mjs" build-object \
     "status=failed" "category=$category" "phase=$phase" \
-    "retryable=$retryable" "message=$message" "run_id=$run_id"
+    "retryable=$retryable" "message=$message" "run_id=$run_id" "$@"
 }

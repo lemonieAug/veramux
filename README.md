@@ -159,9 +159,9 @@ the fuller channel set if you want it (`agent-reach doctor`).
 - git.
 - A Claude Code subscription (for the lead).
 - A ChatGPT plan Codex is authorized against (for the reviewer).
-- A DeepSeek API key (drives the orchestrator itself — see
-  [Security](#security) for why this is a different, expected cost, not the
-  thing this stack is trying to prevent).
+- A DeepSeek API key for the relay's primary provider. An OpenAI API key is
+  optional and enables the relay fallback; neither key authenticates the
+  Claude Code or Codex child process.
 - Optional, all independently skippable (the run degrades gracefully
   without any of them — see [Context tools](#context-tools)): `graphify`
   (`uv tool install graphifyy`), claude-mem (`npx claude-mem install`,
@@ -219,16 +219,28 @@ dedicated, read-only-sandboxed `CODEX_HOME` — re-run it (or just
 `scripts/install.sh` again) after logging in if you configured before
 logging in.
 
-**DeepSeek (the orchestrator's own model):**
+**Relay providers — DeepSeek primary, OpenAI fallback:**
 
 ```sh
-export DEEPSEEK_API_KEY=...   # or put it in $DSH_HOME/.env
+export VERAMUX_DEEPSEEK_API_KEY=...      # primary; or put it in $DSH_HOME/.env
+export VERAMUX_DEEPSEEK_MODEL=deepseek-chat  # optional default
+
+export VERAMUX_OPENAI_API_KEY=...        # optional fallback only
+export VERAMUX_OPENAI_MODEL=gpt-5-mini   # optional fallback default
 ```
 
-Never put your `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` into a `dsh` provider
-config to "make it work faster" — see [Security](#security). If you're
-stuck on auth, `agent doctor` tells you specifically what it can and can't
-confirm.
+Every relay call starts at DeepSeek. OpenAI is tried only after DeepSeek's
+retry budget ends with `RATE_LIMIT`, `QUOTA`, `PROVIDER_UNAVAILABLE`, or
+`TIMEOUT`, or when DeepSeek is not configured and OpenAI is. Configuration,
+authentication, malformed/internal output, validation/review, cancellation,
+policy/security, and unknown failures do not trigger fallback. The two
+`apiKeyEnv` references are independent and the unselected ambient key is
+removed before `dsh` starts. Never put `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+into a Claude/Codex child-provider config.
+
+`agent doctor` reports all supported states: both providers (normal with
+fallback), DeepSeek only (normal without fallback), OpenAI only (degraded),
+or neither (blocked).
 
 ## `agent doctor`
 
@@ -533,7 +545,9 @@ manager, framework names, validation-command count — never file contents),
 character counts and which sources were used — memory/graph/external —
 never the content itself), `lead.started/completed/failed`,
 `validation.started/completed`, `review.started/completed/failed`,
-`correction.started/completed/failed`, `run.resumed`,
+`correction.started/completed/failed`, `provider.primary_selected`,
+`provider.attempt`, `provider.fallback_triggered/skipped`,
+`provider.responded`, `run.resumed`,
 `run.state_changed`. Every line carries `schema_version` and a timestamp.
 
 ```sh
@@ -573,9 +587,17 @@ SIGTERM is real, tree-scoped cleanup, not a guess.
 
 Retries are rare and specific (`policies/runtime.yaml`: `retry.
 transient_max_attempts: 2`, `retry.malformed_review_max_attempts: 1`) —
-only `RATE_LIMIT`, `PROVIDER_UNAVAILABLE`, and one retry of a malformed
-reviewer JSON response are ever auto-retried. Authentication, quota,
-validation/review outcomes, and configuration errors never are.
+only `RATE_LIMIT`, `PROVIDER_UNAVAILABLE`, `TIMEOUT`, and one retry of a
+malformed reviewer JSON response are auto-retried. After those retries,
+the relay fallback allowlist also permits `QUOTA`. Authentication,
+validation/review outcomes, configuration, cancellation, policy/security,
+and unknown errors never retry or fall back.
+
+If both relay providers fail, `final.json` remains failed and carries the
+sanitized `primary_error` and `fallback_error` categories. `events.jsonl`
+retains each attempt and `provider.responded` names the provider that actually
+answered; no API-key value is journaled. A later call always starts at
+DeepSeek again.
 
 ```sh
 agent cancel <run-id>
@@ -826,11 +848,11 @@ switching providers stays a manual decision.
   if `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` are set in your shell (a softer,
   informational risk — it affects a host CLI run outside this stack, not
   the subagents themselves). No secret value is ever printed.
-- **DeepSeek's own API cost is expected, not the risk being guarded
-  against.** The orchestrator (both profiles' driving model) needs some
-  chat-completions backend; DeepSeek is the natively wired default and its
-  cost is small because child (Claude/Codex) tokens never enter the
-  orchestrator's own context.
+- **DeepSeek is the relay primary; OpenAI is an optional paid fallback.**
+  OpenAI is never selected merely because an unknown/local error occurred.
+  The dedicated relay keys are not interchangeable, and the Codex child keeps
+  using its own `CODEX_HOME`/`codex login` authentication. Child
+  Claude/Codex tokens never enter the relay model's own context.
 - **Secrets never reach the reviewer.** [`lib/redact.sh`](lib/redact.sh)
   strips the diff content of any path matching
   [`policies/safety.yaml: ignore_patterns`](policies/safety.yaml) (`.env`,
@@ -963,7 +985,9 @@ false`) — see [Operational hardening (P2)](#operational-hardening-p2).
   text rather than exposing the subagent's own diagnostic fields to an
   external caller (see `docs/upstream-findings.md` P2 section). Exit
   codes, our own timeout/cancel signals, and validation/review outcomes
-  are fully deterministic; this subset is honestly heuristic.
+  are fully deterministic; this subset is honestly heuristic. Because this
+  classification gates relay fallback, its allowlist is closed: an
+  unrecognized error becomes `INTERNAL` and does not switch providers.
 - **"Uncertain" resume can't distinguish "Claude finished writing but the
   process died before logging completion" from "Claude was still
   writing"** — both look identical from outside (no completion event

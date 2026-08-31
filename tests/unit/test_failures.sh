@@ -9,7 +9,7 @@ set +e
 # --- exit-code classification (deterministic, our own conventions) ---
 assert_eq "TIMEOUT" "$(failure_classify_exit_code 124)" "exit 124 is TIMEOUT (our proc_timeout convention)"
 assert_eq "CANCELLED" "$(failure_classify_exit_code 130)" "exit 130 is CANCELLED (SIGINT, matches dsh's own docs)"
-assert_eq "CANCELLED" "$(failure_classify_exit_code 137)" "exit 137 (SIGKILL) is CANCELLED"
+assert_eq "TIMEOUT" "$(failure_classify_exit_code 137)" "exit 137 without a cancel marker is timeout escalation"
 assert_eq "" "$(failure_classify_exit_code 1)" "an ordinary exit 1 has no special exit-code meaning"
 
 # --- text heuristic (last resort, documented as such) ---
@@ -29,6 +29,7 @@ assert_eq "INTERNAL" "$(failure_classify 1 'x' 'NOT_A_REAL_CATEGORY')" "an inval
 # --- retryability: the fixed, small list ---
 assert_exit_code "0" "RATE_LIMIT is retryable" failure_is_retryable RATE_LIMIT
 assert_exit_code "0" "PROVIDER_UNAVAILABLE is retryable" failure_is_retryable PROVIDER_UNAVAILABLE
+assert_exit_code "0" "TIMEOUT is retryable before provider fallback" failure_is_retryable TIMEOUT
 assert_exit_code "0" "MALFORMED_OUTPUT is retryable" failure_is_retryable MALFORMED_OUTPUT
 assert_exit_code "1" "AUTHENTICATION is never retryable" failure_is_retryable AUTHENTICATION
 assert_exit_code "1" "QUOTA is never retryable" failure_is_retryable QUOTA

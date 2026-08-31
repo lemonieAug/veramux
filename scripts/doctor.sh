@@ -46,6 +46,7 @@ CRITICAL_FAILURES=0
 ok()   { printf '  \xe2\x9c\x93 %s\n' "$*"; }
 bad()  { printf '  \xc3\x97 %s\n' "$*"; FAILURES=$((FAILURES + 1)); }
 crit() { printf '  \xc3\x97 %s [blocking]\n' "$*"; FAILURES=$((FAILURES + 1)); CRITICAL_FAILURES=$((CRITICAL_FAILURES + 1)); }
+warn() { printf '  ! %s [degraded]\n' "$*"; FAILURES=$((FAILURES + 1)); }
 info() { echo "  - $*"; }
 
 section() { echo; echo "$1"; }
@@ -62,6 +63,15 @@ patch_row_disabled() {
 }
 
 section "Core"
+if env_orchestrator_deepseek_configured "$DSH_HOME_DIR/.env" && env_orchestrator_openai_configured "$DSH_HOME_DIR/.env"; then
+  ok "relay providers: DeepSeek primary ($(env_orchestrator_deepseek_model)); OpenAI fallback ($(env_orchestrator_openai_model)); credentials present (values hidden)"
+elif env_orchestrator_deepseek_configured "$DSH_HOME_DIR/.env"; then
+  ok "relay provider: DeepSeek primary ($(env_orchestrator_deepseek_model)); OpenAI fallback is not configured"
+elif env_orchestrator_openai_configured "$DSH_HOME_DIR/.env"; then
+  warn "DeepSeek primary is not configured; OpenAI ($(env_orchestrator_openai_model)) is available as the degraded relay provider"
+else
+  crit "no relay credential is configured; set VERAMUX_DEEPSEEK_API_KEY and optionally VERAMUX_OPENAI_API_KEY"
+fi
 if env_has_cmd git; then ok "git ($(git --version | awk '{print $3}'))"; else crit "git not found"; fi
 if env_has_cmd node && env_node_version_ok; then ok "Node ($(env_node_version))"; elif env_has_cmd node; then bad "Node $(env_node_version) found, but >= 22.19.0 required"; else crit "Node not found"; fi
 if env_has_cmd pnpm; then ok "pnpm ($(pnpm --version))"; else bad "pnpm not found (needed by 'dsh plugin')"; fi

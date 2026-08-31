@@ -89,9 +89,11 @@ print_auth_instructions() {
   echo "     Log in with your ChatGPT plan. scripts/configure.sh links this"
   echo "     login into the dedicated read-only CODEX_HOME the reviewer uses."
   echo
-  echo "DeepSeek (required — this is the model driving the orchestrator itself,"
-  echo "unrelated to the two logins above):"
-  echo "  Set DEEPSEEK_API_KEY in your environment or in \$DSH_HOME/.env."
+  echo "Relay model (independent from the two child-product logins above):"
+  echo "  Primary: set VERAMUX_DEEPSEEK_API_KEY in your environment or \$DSH_HOME/.env."
+  echo "  Optional model: VERAMUX_DEEPSEEK_MODEL (default: deepseek-chat)."
+  echo "  Fallback: optionally set VERAMUX_OPENAI_API_KEY. It is used only after"
+  echo "  an eligible DeepSeek failure; VERAMUX_OPENAI_MODEL defaults to gpt-5-mini."
 }
 
 # P1 context tools are optional and never auto-installed here: Graphify and

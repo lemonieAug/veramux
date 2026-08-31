@@ -79,6 +79,18 @@ run_cli_status() {
 
   echo "providers:"
   env_has_cmd dsh && echo "  dsh: present" || echo "  dsh: NOT FOUND"
+  local relay_env_file
+  relay_env_file="$(env_dsh_home)/.env"
+  if env_orchestrator_deepseek_configured "$relay_env_file"; then
+    echo "  relay primary: DeepSeek configured"
+  else
+    echo "  relay primary: DeepSeek NOT configured"
+  fi
+  if env_orchestrator_openai_configured "$relay_env_file"; then
+    echo "  relay fallback: OpenAI configured"
+  else
+    echo "  relay fallback: OpenAI not configured"
+  fi
   env_has_cmd claude && echo "  claude CLI: present" || echo "  claude CLI: not on PATH (not required)"
   env_has_cmd codex && echo "  codex CLI: present" || echo "  codex CLI: not on PATH (not required)"
 }
@@ -122,6 +134,9 @@ run_cli_show() {
   echo "base_git_head: $(_run_cli_field "$run_dir" base_git_head)"
   echo "current_git_head: $(_run_cli_field "$run_dir" current_git_head)"
   echo "dirty_at_start: $(_run_cli_field "$run_dir" dirty_at_start)"
+  echo "primary_provider: $(_run_cli_field "$run_dir" primary_provider)"
+  echo "fallback_triggered: $(_run_cli_field "$run_dir" fallback_triggered)"
+  echo "last_relay_provider: $(_run_cli_field "$run_dir" last_relay_provider)"
   if [ -f "$run_dir/project-profile.json" ]; then
     echo "project profile (P2.3): $(node -e '
       const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))

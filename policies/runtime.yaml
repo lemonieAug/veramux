@@ -31,6 +31,15 @@ retry:
   transient_max_attempts: 2
   malformed_review_max_attempts: 1
 
+# Relay-provider fallback is separate from Claude Code / Codex authentication.
+# This comma-separated allowlist is intentionally closed: INTERNAL,
+# CONFIGURATION, AUTHENTICATION, malformed output, validation/review failures,
+# policy/security failures, and every unknown category do not fall back.
+provider_fallback:
+  primary: deepseek
+  fallback: openai
+  eligible_categories: RATE_LIMIT,QUOTA,PROVIDER_UNAVAILABLE,TIMEOUT
+
 # P2.5/P2.12/P2.17
 runs:
   persistence: true

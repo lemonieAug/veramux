@@ -15,6 +15,13 @@ _ORCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _ORCH_ROOT_DIR="$(cd "$_ORCH_LIB_DIR/.." && pwd)"
 _ORCH_RUNTIME_POLICY="$_ORCH_ROOT_DIR/policies/runtime.yaml"
 
+# Focused tests and embedders sometimes source this library directly instead
+# of entering through bin/agent, which normally loads the provider helpers.
+if ! declare -F provider_primary >/dev/null 2>&1; then
+  # shellcheck source=lib/provider_fallback.sh
+  source "$_ORCH_LIB_DIR/provider_fallback.sh"
+fi
+
 orchestrate_max_rounds() {
   grep '^max_correction_rounds:' "$_ORCH_ROOT_DIR/policies/orchestration.yaml" | awk '{print $2}'
 }
@@ -38,8 +45,11 @@ orchestrate_render() { node "$_ORCH_LIB_DIR/render-template.mjs" "$@"; }
 # the wrapper shell means the tracked PID IS dsh, not an intermediate shell.
 # Sets ORCHESTRATE_LAST_FAILURE_CATEGORY; returns 0/1.
 ORCHESTRATE_LAST_FAILURE_CATEGORY=""
-orchestrate_call_dsh_tracked() {
-  local workspace="$1" run_dir="$2" profile="$3" message_file="$4" out_file="$5" timeout_kind="$6" event_prefix="$7"
+ORCHESTRATE_LAST_RESPONDING_PROVIDER=""
+ORCHESTRATE_PRIMARY_FAILURE_CATEGORY=""
+ORCHESTRATE_FALLBACK_FAILURE_CATEGORY=""
+_orchestrate_call_dsh_provider_tracked() {
+  local workspace="$1" run_dir="$2" profile="$3" message_file="$4" out_file="$5" timeout_kind="$6" event_prefix="$7" relay_provider="$8"
   local timeout_s grace_s attempt=0 max_attempts message
   # AGENT_TIMEOUT_OVERRIDE_<KIND> / AGENT_TIMEOUT_OVERRIDE_GRACE let an
   # operator (or a failure-injection test — see tests/unit/test_failure_
@@ -66,20 +76,33 @@ orchestrate_call_dsh_tracked() {
 
   while :; do
     attempt=$((attempt + 1))
-    journal_event_emit "$run_dir" "${event_prefix}.started" "provider=$profile" "attempt=$attempt"
+    journal_event_emit "$run_dir" "provider.attempt" "profile=$profile" "provider_attempt=$relay_provider" "attempt=$attempt" "configured=true"
+    journal_event_emit "$run_dir" "${event_prefix}.started" "profile=$profile" "provider=$relay_provider" "attempt=$attempt"
 
     local code=0
     proc_call_with_timeout "$run_dir" "$timeout_s" "$grace_s" "$out_file" -- \
-      bash -c 'cd "$1" && exec dsh --profile "$2" "$3"' _ "$workspace" "$profile" "$message" || code=$?
+      bash -c '
+        cd "$1"
+        export VERAMUX_RELAY_PROVIDER="$4"
+        case "$4" in
+          deepseek) unset VERAMUX_OPENAI_API_KEY ;;
+          openai) unset VERAMUX_DEEPSEEK_API_KEY ;;
+          *) exit 2 ;;
+        esac
+        exec dsh --profile "$2" "$3"
+      ' _ "$workspace" "$profile" "$message" "$relay_provider" || code=$?
 
     if proc_cancel_requested "$run_dir"; then
       ORCHESTRATE_LAST_FAILURE_CATEGORY="CANCELLED"
-      journal_event_emit "$run_dir" "${event_prefix}.failed" "category=CANCELLED" "attempt=$attempt"
+      journal_event_emit "$run_dir" "${event_prefix}.failed" "profile=$profile" "provider=$relay_provider" "category=CANCELLED" "attempt=$attempt"
       return 1
     fi
 
     if [ "$code" -eq 0 ]; then
-      journal_event_emit "$run_dir" "${event_prefix}.completed" "attempt=$attempt"
+      journal_event_emit "$run_dir" "${event_prefix}.completed" "profile=$profile" "provider=$relay_provider" "attempt=$attempt"
+      journal_event_emit "$run_dir" "provider.responded" "profile=$profile" "responding_provider=$relay_provider" "attempt=$attempt"
+      journal_run_update "$run_dir" "last_relay_provider=$relay_provider" "last_provider_profile=$profile"
+      ORCHESTRATE_LAST_RESPONDING_PROVIDER="$relay_provider"
       ORCHESTRATE_LAST_FAILURE_CATEGORY=""
       return 0
     fi
@@ -88,7 +111,7 @@ orchestrate_call_dsh_tracked() {
     combined="$(cat "$out_file" 2>/dev/null || true)"
     category="$(failure_classify "$code" "$combined" "")"
     ORCHESTRATE_LAST_FAILURE_CATEGORY="$category"
-    journal_event_emit "$run_dir" "${event_prefix}.failed" "category=$category" "attempt=$attempt" "exit_code=$code"
+    journal_event_emit "$run_dir" "${event_prefix}.failed" "profile=$profile" "provider=$relay_provider" "category=$category" "attempt=$attempt" "exit_code=$code"
 
     if retry_should_retry "$category" "$attempt" transient; then
       local backoff
@@ -99,6 +122,75 @@ orchestrate_call_dsh_tracked() {
     fi
     return 1
   done
+}
+
+# Public DSH-call wrapper. Every call starts with DeepSeek. OpenAI is attempted
+# only after the primary retry budget is exhausted and the resulting category
+# is explicitly allowlisted by lib/provider_fallback.sh. A successful fallback
+# is not sticky: the next invocation starts at DeepSeek again.
+orchestrate_call_dsh_tracked() {
+  local workspace="$1" run_dir="$2" profile="$3" message_file="$4" out_file="$5" timeout_kind="$6" event_prefix="$7"
+  local primary fallback env_file primary_configured=true fallback_reason
+  primary="$(provider_primary)"
+  fallback="$(provider_fallback)"
+  env_file="$(env_dsh_home)/.env"
+
+  ORCHESTRATE_LAST_FAILURE_CATEGORY=""
+  ORCHESTRATE_LAST_RESPONDING_PROVIDER=""
+  ORCHESTRATE_PRIMARY_FAILURE_CATEGORY=""
+  ORCHESTRATE_FALLBACK_FAILURE_CATEGORY=""
+
+  journal_run_update "$run_dir" \
+    "primary_provider=$primary" "fallback_triggered=false" \
+    "primary_provider_error=null" "fallback_provider_error=null"
+  journal_event_emit "$run_dir" "provider.primary_selected" "primary_provider=$primary" "profile=$profile"
+
+  if provider_is_configured "$primary" "$env_file"; then
+    if _orchestrate_call_dsh_provider_tracked "$workspace" "$run_dir" "$profile" "$message_file" "$out_file" "$timeout_kind" "$event_prefix" "$primary"; then
+      return 0
+    fi
+  else
+    primary_configured=false
+    ORCHESTRATE_LAST_FAILURE_CATEGORY="PROVIDER_UNAVAILABLE"
+    journal_event_emit "$run_dir" "provider.attempt" "profile=$profile" "provider_attempt=$primary" "attempt=0" "configured=false"
+    journal_event_emit "$run_dir" "${event_prefix}.failed" "profile=$profile" "provider=$primary" "category=PROVIDER_UNAVAILABLE" "attempt=0"
+  fi
+
+  ORCHESTRATE_PRIMARY_FAILURE_CATEGORY="$ORCHESTRATE_LAST_FAILURE_CATEGORY"
+  journal_run_update "$run_dir" "primary_provider_error=$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY"
+  [ "$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY" = "CANCELLED" ] && return 1
+
+  if ! provider_fallback_is_eligible "$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY" "$primary_configured"; then
+    journal_event_emit "$run_dir" "provider.fallback_skipped" \
+      "fallback_from=$primary" "fallback_to=$fallback" \
+      "category=$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY" "reason=not_eligible"
+    return 1
+  fi
+
+  fallback_reason="$(provider_fallback_reason "$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY" "$primary_configured")"
+  journal_run_update "$run_dir" \
+    "fallback_triggered=true" "fallback_from=$primary" \
+    "fallback_to=$fallback" "fallback_reason=$fallback_reason"
+  journal_event_emit "$run_dir" "provider.fallback_triggered" \
+    "fallback_triggered=true" "fallback_from=$primary" \
+    "fallback_to=$fallback" "fallback_reason=$fallback_reason" \
+    "primary_error=$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY" "profile=$profile"
+  echo "relay fallback: $primary -> $fallback ($fallback_reason)" >&2
+
+  if ! provider_is_configured "$fallback" "$env_file"; then
+    ORCHESTRATE_FALLBACK_FAILURE_CATEGORY="CONFIGURATION"
+    journal_event_emit "$run_dir" "provider.attempt" "profile=$profile" "provider_attempt=$fallback" "attempt=0" "configured=false"
+    journal_event_emit "$run_dir" "${event_prefix}.failed" "profile=$profile" "provider=$fallback" "category=CONFIGURATION" "attempt=0"
+    journal_run_update "$run_dir" "fallback_provider_error=CONFIGURATION"
+    return 1
+  fi
+
+  if _orchestrate_call_dsh_provider_tracked "$workspace" "$run_dir" "$profile" "$message_file" "$out_file" "$timeout_kind" "$event_prefix" "$fallback"; then
+    return 0
+  fi
+  ORCHESTRATE_FALLBACK_FAILURE_CATEGORY="$ORCHESTRATE_LAST_FAILURE_CATEGORY"
+  journal_run_update "$run_dir" "fallback_provider_error=$ORCHESTRATE_FALLBACK_FAILURE_CATEGORY"
+  return 1
 }
 
 # orchestrate_capture_project_profile <workspace> <run_dir>
@@ -176,9 +268,15 @@ _orchestrate_finish() {
     journal_run_transition "$run_dir" "$final_state"
   fi
   if [ "$final_state" = "COMPLETED" ]; then
-    orchestrate_json build-object "status=completed" "run_id=$run_id" "message=$message" > "$run_dir/final.json"
+    local responding_provider
+    responding_provider="$(journal_run_get_field "$run_dir" last_relay_provider 2>/dev/null || true)"
+    orchestrate_json build-object "status=completed" "run_id=$run_id" "message=$message" \
+      "responding_provider=$responding_provider" > "$run_dir/final.json"
   else
-    failure_result_json "$category" "$phase" "$message" "$run_id" > "$run_dir/final.json"
+    local -a provider_errors=()
+    [ -n "$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY" ] && provider_errors+=("primary_provider=deepseek" "primary_error=$ORCHESTRATE_PRIMARY_FAILURE_CATEGORY")
+    [ -n "$ORCHESTRATE_FALLBACK_FAILURE_CATEGORY" ] && provider_errors+=("fallback_provider=openai" "fallback_error=$ORCHESTRATE_FALLBACK_FAILURE_CATEGORY")
+    failure_result_json "$category" "$phase" "$message" "$run_id" "${provider_errors[@]}" > "$run_dir/final.json"
   fi
   chmod 600 "$run_dir/final.json" 2>/dev/null || true
 }

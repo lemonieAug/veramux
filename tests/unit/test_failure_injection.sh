@@ -69,6 +69,13 @@ use_mock_dsh hang
 export HANG_PID_FILE="$TMP/hang.pid"
 export AGENT_TIMEOUT_OVERRIDE_CLAUDE=2
 export AGENT_TIMEOUT_OVERRIDE_GRACE=1
+# TIMEOUT is intentionally retried once before the relay provider considers
+# fallback.  On Windows/Git Bash, disposing the whole child process tree can
+# add substantial scheduling overhead after each TERM/KILL cycle.  Keep a
+# finite end-to-end ceiling that covers two deadline/grace cycles, the retry
+# backoff, and that platform cleanup overhead; a hung child must never leave
+# this test running indefinitely.
+max_elapsed_seconds=45
 make_node_fixture "$TMP/scenB"
 start_ts=$(date +%s)
 outB="$(run_agent "$TMP/scenB" "task" 2>&1)"
@@ -77,7 +84,7 @@ elapsed=$(( $(date +%s) - start_ts ))
 unset AGENT_TIMEOUT_OVERRIDE_CLAUDE AGENT_TIMEOUT_OVERRIDE_GRACE
 run_idB="$(run_id_from_output "$outB")"
 assert_eq "1" "$codeB" "Scenario B: a hung call is a failure, never a false success"
-assert_eq "1" "$([ "$elapsed" -le 20 ] && echo 1 || echo 0)" "Scenario B: bounded by OUR timeout, not left hanging (elapsed=${elapsed}s)"
+assert_eq "1" "$([ "$elapsed" -le "$max_elapsed_seconds" ] && echo 1 || echo 0)" "Scenario B: bounded by the retry-aware timeout budget (elapsed=${elapsed}s, max=${max_elapsed_seconds}s)"
 if [ -n "$run_idB" ]; then
   run_dirB="$(run_cli_find_run_dir "$run_idB")"
   assert_contains "$(cat "$run_dirB/final.json" 2>/dev/null)" '"category":"TIMEOUT"' "Scenario B: classified as TIMEOUT"

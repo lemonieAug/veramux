@@ -44,6 +44,8 @@ source "$ROOT_DIR/lib/failures.sh"
 source "$ROOT_DIR/lib/proc_timeout.sh"
 # shellcheck source=../lib/retry.sh
 source "$ROOT_DIR/lib/retry.sh"
+# shellcheck source=../lib/provider_fallback.sh
+source "$ROOT_DIR/lib/provider_fallback.sh"
 # shellcheck source=../lib/workspace_lock.sh
 source "$ROOT_DIR/lib/workspace_lock.sh"
 # shellcheck source=../lib/git_safety.sh

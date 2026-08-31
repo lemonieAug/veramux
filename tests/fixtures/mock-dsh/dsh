@@ -15,6 +15,50 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Provider-fallback scenarios exercise the outer Veramux relay policy. They
+# deliberately do not model Claude/Codex behavior; a successful call returns a
+# small response and a failed call emits a category-shaped diagnostic.
+if [ -n "${MOCK_PROVIDER_SCENARIO:-}" ]; then
+  relay="${VERAMUX_RELAY_PROVIDER:-deepseek}"
+  if [ -n "${MOCK_DSH_PROVIDER_LOG:-}" ]; then
+    printf '%s\t%s\tdeepseek_key=%s\topenai_key=%s\n' \
+      "$profile" "$relay" \
+      "$([ -n "${VERAMUX_DEEPSEEK_API_KEY:-}" ] && echo present || echo absent)" \
+      "$([ -n "${VERAMUX_OPENAI_API_KEY:-}" ] && echo present || echo absent)" \
+      >> "$MOCK_DSH_PROVIDER_LOG"
+  fi
+
+  # The unselected ambient key must be removed before dsh starts.
+  if [ "$relay" = "deepseek" ] && [ -n "${VERAMUX_OPENAI_API_KEY:-}" ]; then
+    echo "wrong-provider credential exposure: OpenAI key visible to DeepSeek call" >&2
+    exit 91
+  fi
+  if [ "$relay" = "openai" ] && [ -n "${VERAMUX_DEEPSEEK_API_KEY:-}" ]; then
+    echo "wrong-provider credential exposure: DeepSeek key visible to OpenAI call" >&2
+    exit 92
+  fi
+
+  if [ "$relay" = "openai" ]; then
+    if [ "${MOCK_OPENAI_FAILURE:-}" = "auth" ]; then
+      echo "Error: invalid api key (401)" >&2
+      exit 1
+    fi
+    echo "relay response from openai"
+    exit 0
+  fi
+
+  case "$MOCK_PROVIDER_SCENARIO" in
+    primary_success) echo "relay response from deepseek"; exit 0 ;;
+    rate_limit) echo "Error: rate limit (429)" >&2; exit 1 ;;
+    quota) echo "Error: insufficient_quota" >&2; exit 1 ;;
+    timeout) exit 124 ;;
+    unavailable) echo "Error: service unavailable (503)" >&2; exit 1 ;;
+    config_error) echo "Error: invalid local configuration" >&2; exit 1 ;;
+    unknown_error) echo "Error: unexpected local parser failure" >&2; exit 1 ;;
+    *) echo "unknown provider scenario" >&2; exit 1 ;;
+  esac
+fi
+
 fixed_add() {
   cat > add.js <<'JS'
 function add(a, b) {
