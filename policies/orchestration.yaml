@@ -7,6 +7,12 @@
 # instead of continuing. Never mask a still-blocking finding as success.
 max_correction_rounds: 2
 
+# Phase 1 hybrid migration. The legacy deterministic controller remains the
+# default; `dsh` is opt-in and uses the official headless/subagent runtime.
+orchestration:
+  engine: legacy
+  tool_mode: native
+
 # P0.9: when review can be skipped entirely (no Codex call, no round spent).
 # All conditions are about the FULL set of changed files.
 skip_review_when:

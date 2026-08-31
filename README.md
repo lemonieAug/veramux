@@ -6,6 +6,14 @@ in charge of running Claude Code as the implementer and Codex as an
 independent, mechanism-enforced read-only reviewer against your own
 projects.
 
+Veramux is migrating from an external orchestration engine toward an
+opinionated engineering integration on top of DSH. This release is a **hybrid
+DSH-native migration**: `legacy` remains the default deterministic controller;
+the opt-in `dsh` engine uses the official DSH runtime/profile infrastructure
+while Veramux retains policy, journal, locking, validation and risk controls.
+See [Architecture](docs/architecture.md), [configuration](docs/configuration.md)
+and [programmatic orchestration](docs/programmatic-orchestration.md).
+
 P0 was the minimum end-to-end loop; P1 added automatic context gathering
 (memory, code-structure graph, external research — all optional, all
 degrading gracefully) and risk-adaptive review depth. P2 was operational
@@ -32,7 +40,7 @@ User
   |
 run journal created (run_id, lock acquired) -- P2.4/P2.5/P2.12
   |
-DeepSeek Harness (orchestrator: dsh)
+DSH runtime/profile infrastructure (legacy controller by default; opt-in hybrid DSH engine)
   |
 Context gathering (memory / graph / grep / external research -- all optional)
   |
@@ -238,6 +246,10 @@ policy/security, and unknown failures do not trigger fallback. The two
 removed before `dsh` starts. Never put `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 into a Claude/Codex child-provider config.
 
+For each relay model, resolution is: process environment, then `$DSH_HOME/.env`,
+then the documented default (`deepseek-chat` or `gpt-5-mini`). The examples
+above show defaults, not required or hardcoded user model choices.
+
 `agent doctor` reports all supported states: both providers (normal with
 fallback), DeepSeek only (normal without fallback), OpenAI only (degraded),
 or neither (blocked).
@@ -314,8 +326,8 @@ session — documented here instead of guessed silently.
 
 0. [`lib/context.sh`](lib/context.sh) builds a small background-context
    block: claude-mem's semantic search (if its worker is up and the task
-   is specific enough), a Graphify query against the project's knowledge
-   graph (built automatically on first use, local AST only), or — only
+   is specific enough), a Graphify query against an explicitly prepared
+   project knowledge graph, or — only
    when there's no graph — a few `git grep` snippets seeded from the
    task's own keywords. External research (Jina Reader/search) is added
    only when the task actually looks like it needs it (a URL, "latest
@@ -323,6 +335,9 @@ session — documented here instead of guessed silently.
    Every source is independently optional and capped
    ([`policies/context.yaml`](policies/context.yaml)); none of this ever
    blocks the run.
+   Before context starts, Veramux records a run-owned baseline of Git-visible
+   files. The reviewer diff is computed from that baseline, so it excludes
+   pre-existing staged, unstaged, and untracked user edits.
 1. The task, wrapped in [`harness/prompts/lead.md`](harness/prompts/lead.md)'s
    instructions (minimal changes, investigate first, no `git commit`/`push`,
    report honestly) plus that background context, goes to the `lead`
@@ -390,11 +405,12 @@ part of the context package stays empty (see `docs/upstream-findings.md`
 for the "why bash pipeline, not a skill" decision).
 
 - **Graphify** (code-structure graph): `uv tool install graphifyy` (or
-  `pipx install graphifyy`). Nothing else to do — `agent` registers the
-  project-scoped skill and builds a code-only graph (local tree-sitter AST,
-  no API key, no LLM) automatically the first time it's useful for a given
-  project. Queries go through the real `graphify query "<question>" --graph
-  graphify-out/graph.json` CLI.
+  `pipx install graphifyy`). Its current CLI writes project configuration and
+  graph artifacts, so setup is explicit and never part of `agent` context
+  gathering. A normal run is read-only with respect to the project workspace:
+  it queries an existing `graphify-out/graph.json` when present, otherwise it
+  falls back to direct reads. Queries use `graphify query "<question>" --graph
+  graphify-out/graph.json`.
 - **claude-mem** (persistent cross-session memory): `npx claude-mem
   install` — a real, heavier dependency (Bun + `uv`, a background worker,
   a global Claude Code plugin), so it's not auto-installed; run it

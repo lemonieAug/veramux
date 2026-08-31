@@ -19,6 +19,7 @@ assert_eq "0" "$?" "no overrides -> caller default (true) wins"
 project_config_bool "$TMP/bare" research enabled false
 assert_eq "1" "$?" "no overrides -> caller default (false) wins"
 assert_eq "" "$(project_config_validation_command "$TMP/bare" test)" "no overrides -> no validation command override"
+assert_eq "legacy" "$(project_config_orchestration_value "$TMP/bare" engine legacy)" "no orchestration config keeps supplied default"
 
 # With .agent/config.yaml
 mkdir -p "$TMP/withconfig/.agent"
@@ -34,6 +35,10 @@ research:
 
 validation:
   test: "make unit-test"
+
+orchestration:
+  engine: dsh
+  tool_mode: auto
 EOF
 
 assert_eq "$(printf 'src/auth/**\nprisma/**')" "$(project_config_extra_high_risk_paths "$TMP/withconfig")" "extra high-risk paths read correctly"
@@ -43,5 +48,7 @@ project_config_bool "$TMP/withconfig" research enabled true
 assert_eq "1" "$?" "research.enabled: false overrides a true default"
 assert_eq "make unit-test" "$(project_config_validation_command "$TMP/withconfig" test)" "validation.test override read correctly"
 assert_eq "" "$(project_config_validation_command "$TMP/withconfig" lint)" "validation.lint has no override -> empty"
+assert_eq "dsh" "$(project_config_orchestration_value "$TMP/withconfig" engine legacy)" "orchestration engine is read from project config"
+assert_eq "auto" "$(project_config_orchestration_value "$TMP/withconfig" tool_mode native)" "orchestration tool mode is read from project config"
 
 report_and_exit

@@ -98,7 +98,6 @@ context_build() {
 
   local graph_added=0
   if context_graph_enabled "$workspace"; then
-    graph_ensure_ready "$workspace" || true
     local graph_max
     graph_max="$(_ctx_budget graph max_chars 8000 graph_max_chars)"
     local graph_text

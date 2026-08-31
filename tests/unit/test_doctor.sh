@@ -47,6 +47,8 @@ EOF
 out_both="$(VERAMUX_DEEPSEEK_API_KEY=deepseek-doctor-canary VERAMUX_OPENAI_API_KEY=openai-doctor-canary DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
 assert_contains "$out_both" "DeepSeek primary" "doctor reports DeepSeek as primary when both providers exist"
 assert_contains "$out_both" "OpenAI fallback" "doctor reports OpenAI as fallback when both providers exist"
+assert_contains "$out_both" "default engine: legacy" "doctor reports the hybrid migration default"
+assert_contains "$out_both" "programmatic primitive: code exists upstream, but is disabled by Veramux policy" "doctor reports the CodeRuntime policy boundary"
 assert_not_contains "$out_both" "deepseek-doctor-canary" "doctor never prints the DeepSeek key"
 assert_not_contains "$out_both" "openai-doctor-canary" "doctor never prints the OpenAI key"
 

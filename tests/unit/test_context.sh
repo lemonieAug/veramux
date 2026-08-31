@@ -25,15 +25,23 @@ assert_contains "$out1" "add.js" "grep fallback finds the file the task is actua
 assert_not_contains "$out1" "Architecture (knowledge graph)" "no graph section when graphify is unavailable"
 assert_not_contains "$out1" "Memory (past work" "no memory section when the worker is unavailable"
 
-# With graphify available: graph section appears, and grep fallback is
-# skipped for the same need (mutual-exclusivity is this module's answer to
-# duplication control — see lib/context.sh).
+# Context gathering must not bootstrap Graphify inside the project. An
+# explicitly prepared graph is queried, and graph setup itself remains a
+# separate, opt-in operation.
 use_mock_graphify
 make_node_fixture "$TMP/withgraph"
+graph_ensure_ready "$TMP/withgraph" >/dev/null 2>&1
 context_build "$TMP/withgraph" "Add validation to prevent negative numbers" "$TMP/out2.md"
 out2="$(cat "$TMP/out2.md")"
 assert_contains "$out2" "Architecture (knowledge graph)" "graph section appears once graphify is available"
 assert_not_contains "$out2" "Possibly relevant source" "grep fallback is skipped once the graph answered (no duplication)"
+
+make_node_fixture "$TMP/read-only"
+before_status="$(git -C "$TMP/read-only" status --porcelain=v1)"
+context_build "$TMP/read-only" "Add validation to prevent negative numbers" "$TMP/out-read-only.md"
+after_status="$(git -C "$TMP/read-only" status --porcelain=v1)"
+assert_eq "$before_status" "$after_status" "context gathering does not create Graphify or Claude artifacts in the workspace"
+assert_eq "0" "$([ ! -e "$TMP/read-only/graphify-out" ] && [ ! -e "$TMP/read-only/.claude" ] && [ ! -e "$TMP/read-only/CLAUDE.md" ]; echo $?)" "context gathering leaves no Graphify bootstrap artifacts"
 
 # Project override disables graph/memory/research even when available.
 mkdir -p "$TMP/withgraph/.agent"

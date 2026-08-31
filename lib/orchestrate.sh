@@ -80,17 +80,14 @@ _orchestrate_call_dsh_provider_tracked() {
     journal_event_emit "$run_dir" "${event_prefix}.started" "profile=$profile" "provider=$relay_provider" "attempt=$attempt"
 
     local code=0
+    # proc_call_with_timeout executes an external argv, so invoke the shared
+    # integration seam in a fresh bash explicitly rather than relying on a
+    # parent-shell function being exported.
     proc_call_with_timeout "$run_dir" "$timeout_s" "$grace_s" "$out_file" -- \
       bash -c '
-        cd "$1"
-        export VERAMUX_RELAY_PROVIDER="$4"
-        case "$4" in
-          deepseek) unset VERAMUX_OPENAI_API_KEY ;;
-          openai) unset VERAMUX_DEEPSEEK_API_KEY ;;
-          *) exit 2 ;;
-        esac
-        exec dsh --profile "$2" "$3"
-      ' _ "$workspace" "$profile" "$message" "$relay_provider" || code=$?
+        source "$5"
+        dsh_integration_exec "$1" "$2" "$3" "$4"
+      ' _ "$workspace" "$profile" "$message" "$relay_provider" "$_ORCH_LIB_DIR/dsh_integration.sh" || code=$?
 
     if proc_cancel_requested "$run_dir"; then
       ORCHESTRATE_LAST_FAILURE_CATEGORY="CANCELLED"
@@ -307,7 +304,7 @@ _orchestrate_review_loop() {
       cp "$seed_review_file" "$review_file"
     else
       local diff_text
-      diff_text="$(project_git_diff "$workspace")"
+      diff_text="$(git_safety_implementation_diff "$workspace" "$run_dir")"
       printf '%s' "$diff_text" | redact_diff "$_ORCH_ROOT_DIR/policies/safety.yaml" > "$run_dir/diff.txt"
       printf '%s' "$task" > "$run_dir/objective.txt"
       printf '%s\n' "$changed_files" > "$run_dir/files.txt"
@@ -515,7 +512,11 @@ _orchestrate_validate_and_review() {
 # survives the max correction rounds, workspace conflict, or cancellation).
 # Never turns a 1 into a 0.
 orchestrate_run() {
-  local workspace="$1" task="$2"
+  local workspace="$1" task="$2" engine_cli="${3:-}" tool_mode_cli="${4:-}"
+  local engine_requested tool_mode_requested engine_resolved tool_mode_resolved
+  engine_requested="$(dsh_engine_requested "$workspace" "$engine_cli")"
+  tool_mode_requested="$(dsh_tool_mode_requested "$workspace" "$tool_mode_cli")"
+  if ! engine_resolved="$(dsh_engine_resolve "$engine_requested")"; then return 1; fi
   local run_id base_head dirty_at_start
   run_id="$(run_id_generate)"
   base_head="$(git_safety_current_head "$workspace")"
@@ -532,7 +533,25 @@ orchestrate_run() {
   local run_dir
   run_dir="$(journal_run_create "$workspace" "$run_id" "$task" "$base_head" "$dirty_at_start")"
   git_safety_snapshot "$workspace" "$run_dir"
+  git_safety_implementation_baseline_create "$workspace" "$run_dir"
   journal_event_emit "$run_dir" "run.created"
+  if ! tool_mode_resolved="$(dsh_tool_mode_resolve "$tool_mode_requested")"; then
+    dsh_integration_record_programmatic_block "$run_dir" "$engine_requested" "$tool_mode_requested"
+    _orchestrate_finish "$run_dir" "$workspace" FAILED POLICY configuration "programmatic orchestration blocked by Veramux single-writer policy"
+    workspace_lock_release "$workspace" "$run_id" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if [ "$engine_resolved" = dsh ] && ! dsh_engine_available; then
+    local dsh_support_status dsh_unavailable_message
+    dsh_support_status="$(dsh_engine_support_status)"
+    dsh_unavailable_message="DSH-native engine unavailable: unsupported or missing dsh ($dsh_support_status)"
+    journal_run_update "$run_dir" "engine_requested=$engine_requested" "engine_resolved=dsh" "tool_mode_requested=$tool_mode_requested" "tool_mode_resolved=$tool_mode_resolved"
+    _orchestrate_finish "$run_dir" "$workspace" FAILED CONFIGURATION configuration "$dsh_unavailable_message"
+    echo "FINAL RESULT: error — $dsh_unavailable_message" >&2
+    workspace_lock_release "$workspace" "$run_id" >/dev/null 2>&1 || true
+    return 1
+  fi
+  dsh_integration_record "$run_dir" "$engine_requested" "$engine_resolved" "$tool_mode_requested" "$tool_mode_resolved"
   orchestrate_capture_project_profile "$workspace" "$run_dir"
   echo "run: $run_id"
   echo "run artifacts: $run_dir"
@@ -617,7 +636,7 @@ orchestrate_run() {
   fi
 
   local changed_files
-  changed_files="$(project_git_changed_files "$workspace")"
+  changed_files="$(git_safety_implementation_changed_files "$workspace" "$run_dir")"
   journal_run_transition "$run_dir" VALIDATING
   if [ -z "$changed_files" ]; then
     echo

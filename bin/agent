@@ -16,6 +16,8 @@ source "$ROOT_DIR/lib/profiles.sh"
 source "$ROOT_DIR/lib/project.sh"
 # shellcheck source=../lib/project_config.sh
 source "$ROOT_DIR/lib/project_config.sh"
+# shellcheck source=../lib/dsh_integration.sh
+source "$ROOT_DIR/lib/dsh_integration.sh"
 # shellcheck source=../lib/validation.sh
 source "$ROOT_DIR/lib/validation.sh"
 # shellcheck source=../lib/project_detect.sh
@@ -142,6 +144,8 @@ Maintenance commands (P3 — 'check'/'plan'/'inventory'/'benchmark --offline'/
   agent memexp [report|...]     Opt-in claude-mem cost experiment (never switches)
   agent --profile economy|balanced|strict <task...>
                                 Run under an optimization profile (default: balanced)
+  agent --engine legacy|dsh [--tool-mode native|auto|programmatic] <path> <task>
+                                Select the hybrid engine. legacy remains the default.
   agent profile [/path]        Show the active optimization profile
 
 If no task text is given, agent reads one line from stdin when input is
@@ -172,10 +176,16 @@ main() {
   # args from anywhere before dispatching. Exported so lib/context.sh and
   # lib/risk.sh (via lib/profiles.sh) pick it up.
   local -a _args=() _a
+  local engine_cli="" tool_mode_cli=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile) shift; AGENT_PROFILE="${1:-}"; export AGENT_PROFILE; shift || true ;;
       --profile=*) AGENT_PROFILE="${1#--profile=}"; export AGENT_PROFILE; shift ;;
+      --engine) shift; engine_cli="${1:-}"; shift || true ;;
+      --engine=*) engine_cli="${1#--engine=}"; shift ;;
+      --tool-mode) shift; tool_mode_cli="${1:-}"; shift || true ;;
+      --tool-mode=*) tool_mode_cli="${1#--tool-mode=}"; shift ;;
+      --programmatic) tool_mode_cli="programmatic"; shift ;;
       *) _args+=("$1"); shift ;;
     esac
   done
@@ -350,7 +360,7 @@ main() {
   fi
 
   echo "workspace: $workspace"
-  orchestrate_run "$workspace" "$task"
+  orchestrate_run "$workspace" "$task" "$engine_cli" "$tool_mode_cli"
 }
 
 main "$@"

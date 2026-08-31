@@ -21,6 +21,59 @@ git_safety_snapshot() {
   project_git_status "$workspace" > "$run_dir/git-status-start.txt" 2>/dev/null || : > "$run_dir/git-status-start.txt"
 }
 
+# git_safety_implementation_baseline_create <workspace> <run_dir>
+# Copies the Git-visible file set to run-owned state before Context starts.
+# This preserves a dirty user workspace while giving the reviewer a temporal
+# baseline for changes produced by the current run. Ignored artifacts are
+# deliberately outside the review surface, as they are outside git diff too.
+git_safety_implementation_baseline_create() {
+  local workspace="$1" run_dir="$2" baseline manifest path
+  baseline="$run_dir/workspace-baseline"
+  manifest="$run_dir/workspace-baseline-files.txt"
+  mkdir -p "$baseline"
+  : > "$manifest"
+  project_is_git_repo "$workspace" >/dev/null 2>&1 || return 0
+  while IFS= read -r -d '' path; do
+    [ -f "$workspace/$path" ] || continue
+    printf '%s\n' "$path" >> "$manifest"
+    mkdir -p "$baseline/$(dirname "$path")"
+    cp -p -- "$workspace/$path" "$baseline/$path"
+  done < <(git -C "$workspace" ls-files -co --exclude-standard -z)
+}
+
+# git_safety_implementation_changed_files <workspace> <run_dir>
+# Reports only paths changed after the run baseline, not pre-existing dirty
+# files. New files are included; removed files remain reportable.
+git_safety_implementation_changed_files() {
+  local workspace="$1" run_dir="$2" baseline="$run_dir/workspace-baseline"
+  local manifest="$run_dir/workspace-baseline-files.txt" path
+  declare -A seen=()
+  if [ -f "$manifest" ]; then
+    while IFS= read -r path; do
+      seen["$path"]=1
+    done < "$manifest"
+  fi
+  while IFS= read -r -d '' path; do seen["$path"]=1; done < <(git -C "$workspace" ls-files -co --exclude-standard -z)
+  for path in "${!seen[@]}"; do
+    if [ -f "$baseline/$path" ] && [ -f "$workspace/$path" ] && cmp -s -- "$baseline/$path" "$workspace/$path"; then
+      continue
+    fi
+    printf '%s\n' "$path"
+  done | sort
+}
+
+# git_safety_implementation_diff <workspace> <run_dir>
+# Emits an untruncated per-file diff from the run-owned baseline. The output
+# is deliberately independent of the repository index, which means existing
+# staged/unstaged user edits never enter the reviewer payload.
+git_safety_implementation_diff() {
+  local workspace="$1" run_dir="$2" baseline="$run_dir/workspace-baseline" path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    git diff --no-index --no-ext-diff -- "$baseline/$path" "$workspace/$path" || true
+  done < <(git_safety_implementation_changed_files "$workspace" "$run_dir")
+}
+
 # git_safety_head_conflict <run_dir> <workspace>
 # True when the branch HEAD has moved since this run started (a commit,
 # checkout, rebase, or pull happened outside the agent) — the one

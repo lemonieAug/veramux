@@ -27,12 +27,11 @@ graph_run() {
   fi
 }
 
-# Idempotent, best-effort, local-only setup for a target project: registers
-# the project-scoped skill (writes files only inside $workspace, no system
-# change, no account touched) and builds a code-only graph if one doesn't
-# exist yet. `--code-only` needs no LLM/API key (tree-sitter AST only), so
-# this is safe to run automatically without asking the user for anything —
-# see docs/upstream-findings.md "gerar na primeira necessidade".
+# Explicit, best-effort setup for a target project. This is intentionally
+# not called from context gathering: Graphify's current CLI writes project
+# configuration and graph artifacts, so invoking it during an agent run
+# would violate Veramux's context-read-only / single-writer boundary.
+# Callers that opt into this setup own its persistent workspace changes.
 graph_ensure_ready() {
   local workspace="$1"
   graph_available || return 1
