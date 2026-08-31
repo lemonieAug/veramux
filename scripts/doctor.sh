@@ -64,11 +64,11 @@ patch_row_disabled() {
 
 section "Core"
 if env_orchestrator_deepseek_configured "$DSH_HOME_DIR/.env" && env_orchestrator_openai_configured "$DSH_HOME_DIR/.env"; then
-  ok "relay providers: DeepSeek primary ($(env_orchestrator_deepseek_model)); OpenAI fallback ($(env_orchestrator_openai_model)); credentials present (values hidden)"
+  ok "relay providers: DeepSeek primary ($(env_orchestrator_deepseek_model "$DSH_HOME_DIR/.env")); OpenAI fallback ($(env_orchestrator_openai_model "$DSH_HOME_DIR/.env")); credentials present (values hidden)"
 elif env_orchestrator_deepseek_configured "$DSH_HOME_DIR/.env"; then
-  ok "relay provider: DeepSeek primary ($(env_orchestrator_deepseek_model)); OpenAI fallback is not configured"
+  ok "relay provider: DeepSeek primary ($(env_orchestrator_deepseek_model "$DSH_HOME_DIR/.env")); OpenAI fallback is not configured"
 elif env_orchestrator_openai_configured "$DSH_HOME_DIR/.env"; then
-  warn "DeepSeek primary is not configured; OpenAI ($(env_orchestrator_openai_model)) is available as the degraded relay provider"
+  warn "DeepSeek primary is not configured; OpenAI ($(env_orchestrator_openai_model "$DSH_HOME_DIR/.env")) is available as the degraded relay provider"
 else
   crit "no relay credential is configured; set VERAMUX_DEEPSEEK_API_KEY and optionally VERAMUX_OPENAI_API_KEY"
 fi

@@ -59,6 +59,36 @@ env_file_var_configured() {
   ' "$file"
 }
 
+# Read a non-secret configuration value from a DSH .env file without sourcing
+# it.  The first non-empty occurrence wins, matching the intended .env
+# precedence while keeping shell syntax (including command substitutions) inert.
+env_file_var_value() {
+  local file="$1" name="$2"
+  [ -f "$file" ] || return 1
+  awk -v wanted="$name" '
+    {
+      line=$0
+      sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+      eq=index(line, "=")
+      if (!eq) next
+      key=substr(line, 1, eq-1)
+      value=substr(line, eq+1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      if (key != wanted || value == "") next
+      if ((substr(value, 1, 1) == "\"" && substr(value, length(value), 1) == "\"") ||
+          (substr(value, 1, 1) == "\047" && substr(value, length(value), 1) == "\047")) {
+        value=substr(value, 2, length(value)-2)
+      }
+      if (value == "") next
+      print value
+      found=1
+      exit
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
 env_orchestrator_deepseek_configured() {
   local env_file="${1:-}"
   [ -n "${VERAMUX_DEEPSEEK_API_KEY:-}" ] || { [ -n "$env_file" ] && env_file_var_configured "$env_file" VERAMUX_DEEPSEEK_API_KEY; }
@@ -72,8 +102,27 @@ env_orchestrator_openai_configured() {
   [ -n "${VERAMUX_OPENAI_API_KEY:-}" ] || { [ -n "$env_file" ] && env_file_var_configured "$env_file" VERAMUX_OPENAI_API_KEY; }
 }
 
-env_orchestrator_deepseek_model() { printf '%s\n' "${VERAMUX_DEEPSEEK_MODEL:-deepseek-chat}"; }
-env_orchestrator_openai_model() { printf '%s\n' "${VERAMUX_OPENAI_MODEL:-gpt-5-mini}"; }
+env_orchestrator_deepseek_model() {
+  local env_file="${1:-}" value
+  if [ -n "${VERAMUX_DEEPSEEK_MODEL:-}" ]; then
+    printf '%s\n' "$VERAMUX_DEEPSEEK_MODEL"
+  elif [ -n "$env_file" ] && value="$(env_file_var_value "$env_file" VERAMUX_DEEPSEEK_MODEL)"; then
+    printf '%s\n' "$value"
+  else
+    printf '%s\n' "deepseek-chat"
+  fi
+}
+
+env_orchestrator_openai_model() {
+  local env_file="${1:-}" value
+  if [ -n "${VERAMUX_OPENAI_MODEL:-}" ]; then
+    printf '%s\n' "$VERAMUX_OPENAI_MODEL"
+  elif [ -n "$env_file" ] && value="$(env_file_var_value "$env_file" VERAMUX_OPENAI_MODEL)"; then
+    printf '%s\n' "$value"
+  else
+    printf '%s\n' "gpt-5-mini"
+  fi
+}
 
 # Presence-only check for the two products' subagent runtimes inside a
 # given DSH profile directory. Returns 0 if the bundle is listed.

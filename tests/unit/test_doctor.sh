@@ -39,12 +39,23 @@ done
 # checks. Values are canaries and must never be printed.
 FAKE_HOME_PROVIDER="$TMP/provider-home"
 setup_fake_dsh_home "$FAKE_HOME_PROVIDER"
+cat > "$FAKE_HOME_PROVIDER/.env" <<'EOF'
+VERAMUX_DEEPSEEK_MODEL=deepseek-doctor-file-model
+VERAMUX_OPENAI_MODEL=openai-doctor-file-model
+EOF
 
 out_both="$(VERAMUX_DEEPSEEK_API_KEY=deepseek-doctor-canary VERAMUX_OPENAI_API_KEY=openai-doctor-canary DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
 assert_contains "$out_both" "DeepSeek primary" "doctor reports DeepSeek as primary when both providers exist"
 assert_contains "$out_both" "OpenAI fallback" "doctor reports OpenAI as fallback when both providers exist"
 assert_not_contains "$out_both" "deepseek-doctor-canary" "doctor never prints the DeepSeek key"
 assert_not_contains "$out_both" "openai-doctor-canary" "doctor never prints the OpenAI key"
+
+# Doctor is the real call site that resolves models with its DSH_HOME/.env
+# path. Process model variables are explicitly absent so this proves the file
+# values enter the displayed provider resolution rather than only the helper.
+out_file_models="$(env -u VERAMUX_DEEPSEEK_MODEL -u VERAMUX_OPENAI_MODEL VERAMUX_DEEPSEEK_API_KEY=deepseek-doctor-canary VERAMUX_OPENAI_API_KEY=openai-doctor-canary DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_file_models" "DeepSeek primary (deepseek-doctor-file-model)" "doctor resolves DeepSeek model from DSH .env"
+assert_contains "$out_file_models" "OpenAI fallback (openai-doctor-file-model)" "doctor resolves OpenAI model from DSH .env"
 
 out_primary="$(VERAMUX_DEEPSEEK_API_KEY=deepseek-doctor-canary DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
 assert_contains "$out_primary" "OpenAI fallback is not configured" "DeepSeek-only is a supported doctor state"
