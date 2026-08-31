@@ -10,10 +10,14 @@ profile=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) profile="$2"; shift 2 ;;
-    --version) echo "dsh/mock 0.0.0-test"; exit 0 ;;
+    --version) echo "${MOCK_DSH_VERSION:-0.1.1-rc.2}"; exit 0 ;;
     *) shift ;;
   esac
 done
+
+if [ -n "${MOCK_DSH_CALL_LOG:-}" ]; then
+  printf 'profile=%s\ttools_mode=%s\n' "$profile" "${DSH_TOOLS_MODE:-unset}" >> "$MOCK_DSH_CALL_LOG"
+fi
 
 # Provider-fallback scenarios exercise the outer Veramux relay policy. They
 # deliberately do not model Claude/Codex behavior; a successful call returns a

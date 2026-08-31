@@ -91,9 +91,9 @@ print_auth_instructions() {
   echo
   echo "Relay model (independent from the two child-product logins above):"
   echo "  Primary: set VERAMUX_DEEPSEEK_API_KEY in your environment or \$DSH_HOME/.env."
-  echo "  Optional model: VERAMUX_DEEPSEEK_MODEL (default: deepseek-chat)."
+  echo "  Optional model: VERAMUX_DEEPSEEK_MODEL (environment > .env > default: deepseek-chat)."
   echo "  Fallback: optionally set VERAMUX_OPENAI_API_KEY. It is used only after"
-  echo "  an eligible DeepSeek failure; VERAMUX_OPENAI_MODEL defaults to gpt-5-mini."
+  echo "  an eligible DeepSeek failure; VERAMUX_OPENAI_MODEL resolves environment > .env > gpt-5-mini."
 }
 
 # P1 context tools are optional and never auto-installed here: Graphify and

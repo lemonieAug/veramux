@@ -6,6 +6,14 @@ in charge of running Claude Code as the implementer and Codex as an
 independent, mechanism-enforced read-only reviewer against your own
 projects.
 
+Veramux is migrating from an external orchestration engine toward an
+opinionated engineering integration on top of DSH. This release is a **hybrid
+DSH-native migration**: `legacy` remains the default deterministic controller;
+the opt-in `dsh` engine uses the official DSH runtime/profile infrastructure
+while Veramux retains policy, journal, locking, validation and risk controls.
+See [Architecture](docs/architecture.md), [configuration](docs/configuration.md)
+and [programmatic orchestration](docs/programmatic-orchestration.md).
+
 P0 was the minimum end-to-end loop; P1 added automatic context gathering
 (memory, code-structure graph, external research — all optional, all
 degrading gracefully) and risk-adaptive review depth. P2 was operational
@@ -32,7 +40,7 @@ User
   |
 run journal created (run_id, lock acquired) -- P2.4/P2.5/P2.12
   |
-DeepSeek Harness (orchestrator: dsh)
+DSH runtime/profile infrastructure (legacy controller by default; opt-in hybrid DSH engine)
   |
 Context gathering (memory / graph / grep / external research -- all optional)
   |
@@ -237,6 +245,10 @@ policy/security, and unknown failures do not trigger fallback. The two
 `apiKeyEnv` references are independent and the unselected ambient key is
 removed before `dsh` starts. Never put `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 into a Claude/Codex child-provider config.
+
+For each relay model, resolution is: process environment, then `$DSH_HOME/.env`,
+then the documented default (`deepseek-chat` or `gpt-5-mini`). The examples
+above show defaults, not required or hardcoded user model choices.
 
 `agent doctor` reports all supported states: both providers (normal with
 fallback), DeepSeek only (normal without fallback), OpenAI only (degraded),

@@ -50,3 +50,13 @@ project_config_validation_command() {
   [ -f "$path" ] || return 0
   policy_get "$path" validation "$label" ""
 }
+
+# project_config_orchestration_value <workspace> <key> <default>
+# Kept in one place so engine/tool-mode precedence does not leak into the
+# deterministic controller. Only the tiny scalar YAML shape policy_get
+# supports is accepted.
+project_config_orchestration_value() {
+  local workspace="$1" key="$2" default="$3" path
+  path="$(project_config_path "$workspace")"
+  [ -f "$path" ] && policy_get "$path" orchestration "$key" "$default" || printf '%s' "$default"
+}

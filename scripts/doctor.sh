@@ -38,6 +38,8 @@ source "$ROOT_DIR/lib/capability_probe.sh"
 source "$ROOT_DIR/lib/inventory.sh"
 # shellcheck source=../lib/profiles.sh
 source "$ROOT_DIR/lib/profiles.sh"
+# shellcheck source=../lib/dsh_integration.sh
+source "$ROOT_DIR/lib/dsh_integration.sh"
 
 DSH_HOME_DIR="$(env_dsh_home)"
 FAILURES=0
@@ -76,6 +78,16 @@ if env_has_cmd git; then ok "git ($(git --version | awk '{print $3}'))"; else cr
 if env_has_cmd node && env_node_version_ok; then ok "Node ($(env_node_version))"; elif env_has_cmd node; then bad "Node $(env_node_version) found, but >= 22.19.0 required"; else crit "Node not found"; fi
 if env_has_cmd pnpm; then ok "pnpm ($(pnpm --version))"; else bad "pnpm not found (needed by 'dsh plugin')"; fi
 if env_dsh_ok; then ok "DeepSeek Harness (dsh $(dsh --version 2>/dev/null || echo '?'))"; else crit "dsh not found — run scripts/install.sh"; fi
+
+section "DSH integration (hybrid migration)"
+ok "default engine: $(dsh_engine_default)"
+if dsh_engine_available; then
+  ok "DSH-native engine: available (headless profiles + native tool presentation)"
+else
+  info "DSH-native engine: unavailable ($(dsh_engine_support_status)); legacy remains available"
+fi
+ok "programmatic primitive: $(dsh_programmatic_primitive) exists upstream, but is disabled by Veramux policy"
+info "reason: current CodeRuntime is not a security boundary and would violate the single-writer boundary"
 
 section "Claude"
 if env_has_cmd claude; then
