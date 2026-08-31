@@ -24,19 +24,22 @@ Last completed phase: PHASE 2 (project detection + validation profile) fully wir
 - **P2.6 observability** — `append-event` with `schema_version: 1`, stable event names,
   paired `<phase>.started` / `.completed` / `.failed`, counts/metadata not payloads.
 - **P2.7 failure taxonomy** — `lib/failures.sh`, 14 categories. Precedence: explicit hint →
-  our exit-code conventions (124/130/137) → curated text patterns (last resort) → INTERNAL. No LLM.
+  our exit-code conventions (124 timeout, 130 cancellation, 137 timeout escalation unless the
+  cancel marker already won) → curated text patterns (last resort) → INTERNAL. No LLM.
 - **P2.8 timeout / cancellation** — `lib/proc_timeout.sh`: GNU `timeout` (or bash fallback),
   SIGTERM to the `dsh` process (which owns its own subprocess-tree disposal), 124 = our deadline.
   PID tracked in `<run_dir>/active.pid` for `agent cancel`; always cleared.
 - **P2.9 retry** — `lib/retry.sh` + `policies/runtime.yaml`. Retryable set is fixed and small:
-  RATE_LIMIT, PROVIDER_UNAVAILABLE, MALFORMED_OUTPUT. Exponential backoff capped 30s.
+  RATE_LIMIT, PROVIDER_UNAVAILABLE, TIMEOUT, MALFORMED_OUTPUT. Exponential backoff capped 30s.
   AUTH / QUOTA / VALIDATION / REVIEW / config / workspace-git conflicts are never retried.
 - **P2.10 resume** — `lib/resume.sh`; `orchestrate.sh` split into re-enterable
   `_orchestrate_validate_and_review` / `_orchestrate_review_loop`. `resume_entry_decision` uses
   `journal_call_in_flight` to tell "phase transition happened, call never started" (safe retry)
   from "call was mid-flight" (UNCERTAIN → refuse without `--force`). Never continues a provider session.
-- **P2.11 provider / quota** — reviewer unreachable is `FAILED` (REVIEW/QUOTA/…), never "approved".
-  No automatic fallback to a paid API key anywhere.
+- **P2.11 provider / quota** — every relay call starts with DeepSeek. After retries, only
+  RATE_LIMIT, QUOTA, PROVIDER_UNAVAILABLE, TIMEOUT, or an unconfigured DeepSeek primary may
+  switch to the separately credentialed OpenAI relay. Both failures remain `FAILED` and are
+  recorded. This does not change Claude Code/Codex child authentication.
 - **P2.12 workspace locking** — `lib/workspace_lock.sh`: `mkdir` lock dir + `info`
   (run_id/pid/hostname/created_at). Stale reclaim only same-host + dead PID; different host = never auto-break.
 - **P2.13 git safety** — `lib/git_safety.sh`: snapshot HEAD + `git status` at start; detect/report only,

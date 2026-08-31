@@ -92,6 +92,10 @@ make_node_fixture() {
 use_mock_dsh() {
   local mode="$1"
   export MOCK_DSH_MODE="$mode"
+  # Existing orchestration tests predate relay fallback and model a normally
+  # configured primary. Dedicated fallback tests explicitly unset this.
+  VERAMUX_DEEPSEEK_API_KEY="${VERAMUX_DEEPSEEK_API_KEY:-test-deepseek-key}"
+  export VERAMUX_DEEPSEEK_API_KEY
   export PATH="$TESTS_DIR/fixtures/mock-dsh:$PATH"
 }
 

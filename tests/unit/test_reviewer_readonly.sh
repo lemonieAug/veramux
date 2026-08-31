@@ -36,6 +36,21 @@ assert_contains "$(cat "$PATCH")" "mode: read-only" "reviewer profile's own sand
 
 assert_contains "$(cat "$CONFIG_TOML")" 'sandbox_mode = "read-only"' "dedicated Codex sandbox is read-only"
 
+for profile_patch in "$PATCH" "$ROOT_DIR/harness/profiles/lead/cordis.patch.yml"; do
+  profile_text="$(cat "$profile_patch")"
+  assert_contains "$profile_text" "apiKeyEnv: VERAMUX_DEEPSEEK_API_KEY" "profile gives DeepSeek its dedicated credential reference"
+  assert_contains "$profile_text" "apiKeyEnv: VERAMUX_OPENAI_API_KEY" "profile gives OpenAI its independent fallback credential reference"
+  assert_contains "$profile_text" "'openai' : 'deepseek-official'" "profile defaults every invocation to the DeepSeek route"
+  assert_contains "$profile_text" "VERAMUX_DEEPSEEK_MODEL || 'deepseek-chat'" "profile exposes the DeepSeek model default"
+  assert_contains "$profile_text" "VERAMUX_OPENAI_MODEL || 'gpt-5-mini'" "profile exposes the OpenAI fallback model default"
+  assert_contains "$profile_text" "- id: settings" "profile prevents shared DSH settings from changing its relay model"
+  assert_contains "$profile_text" "disabled: true" "shared settings are actually disabled"
+done
+
+assert_not_contains "$(cat "$PATCH")" "      OPENAI_API_KEY:" "reviewer child env never forwards the generic OpenAI API key"
+assert_not_contains "$(cat "$PATCH")" "      VERAMUX_OPENAI_API_KEY:" "reviewer child env never forwards the relay fallback key"
+assert_not_contains "$(cat "$PATCH")" "      VERAMUX_DEEPSEEK_API_KEY:" "reviewer child env never forwards the relay primary key"
+
 # The lead profile must NOT have a native bash/fs/editor path either — all
 # implementation work is meant to happen inside Claude Code's own session.
 LEAD_PATCH="$ROOT_DIR/harness/profiles/lead/cordis.patch.yml"

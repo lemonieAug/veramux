@@ -42,7 +42,7 @@ migration_detect() {
       ;;
     claude-code|codex)
       concerns+=("the bundle may pull a new Claude Agent SDK / Codex wrapper with changed auth or tool behaviour")
-      concerns+=("verify the subscription login still works and no *_API_KEY fallback was introduced (see policies/safety.yaml)")
+      concerns+=("verify the subscription login still works and no generic child API key forwarding was introduced (see policies/safety.yaml)")
       ;;
     node|git|pnpm|bun|python|uv)
       severity="reversible"

@@ -21,6 +21,7 @@ assert_eq "30" "$(retry_backoff_seconds 10)" "backoff is capped at 30s, never st
 
 # --- retry_should_retry: gates on both retryability AND attempt budget ---
 assert_exit_code "0" "RATE_LIMIT with 1 attempt so far, budget 2: should retry" retry_should_retry RATE_LIMIT 1 transient
+assert_exit_code "0" "TIMEOUT with 1 attempt so far, budget 2: should retry" retry_should_retry TIMEOUT 1 transient
 assert_exit_code "1" "RATE_LIMIT with 2 attempts so far, budget 2: exhausted" retry_should_retry RATE_LIMIT 2 transient
 assert_exit_code "1" "AUTHENTICATION is never retried regardless of attempts_so_far" retry_should_retry AUTHENTICATION 0 transient
 assert_exit_code "0" "MALFORMED_OUTPUT with 0 attempts so far, budget 1: should retry once" retry_should_retry MALFORMED_OUTPUT 0 malformed_review

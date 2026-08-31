@@ -17,8 +17,10 @@ on a framework called Cordis. The CLI binary is `dsh`. It ships a Web UI
 final assistant text to stdout, and exits 0/1 based on completion. There is no
 separate "orchestrator mode" flag — every `dsh` session is driven by a
 configured chat-completions model (a "brain") that reasons and calls tools;
-DeepSeek is the natively wired default (`DEEPSEEK_API_KEY`), but any
-OpenAI-compatible endpoint can be configured.
+  DeepSeek is the natively wired default. Veramux overrides its credential
+  reference with `VERAMUX_DEEPSEEK_API_KEY` and configures the dormant
+  multi-provider adapter's OpenAI route with the independent
+  `VERAMUX_OPENAI_API_KEY` fallback credential.
 
 Node `^22.19.0 || >=24.0.0`, package manager `pnpm@11.7.0` (from `package.json`).
 
@@ -121,8 +123,10 @@ enforcement has to happen at the **product** layer, the way the spec's
   Settings → Models — **we must not do this for Claude/Codex**; that path is
   plain pay-per-token API billing with no relationship to the Claude Code /
   Codex Bundles or their subscription auth. Anywhere our docs mention
-  "configure the model," it means DeepSeek (or another cheap/local
-  OpenAI-compatible endpoint), never Anthropic/OpenAI directly.
+  Veramux disables the shared settings row in its two deterministic relay
+  profiles and selects DeepSeek/OpenAI per fresh headless process. This OpenAI
+  route is only the small relay fallback; it is not the Codex subagent and
+  never replaces Codex's `CODEX_HOME` authentication.
 - **Code Mode**: not a YAML key — it's the env var `DSH_TOOLS_MODE`, one of
   `native | code | both`, read at process start. Applies to the orchestrating
   session's own tool-calling style; irrelevant to the Claude/Codex subagent
@@ -573,8 +577,8 @@ supervisor").
   ourselves — exactly the "não crie process supervisor paralelo" principle.
   `agent cancel` and the P2.8 timeout wrapper are the same mechanism: send
   SIGTERM to the tracked `dsh` PID, wait, escalate.
-- **No wall-clock timeout also means no built-in retry/backoff for us to
-  reuse** — P2.9's retry policy is ours to write, operating at the level of
+- **No wall-clock timeout also means no outer process retry/backoff for us to
+  reuse** — P2.9's retry/fallback policy is ours to write, operating at the level of
   "re-invoke `dsh --profile ... "..."` once more", not at DSH's internal
   layer.
 
@@ -587,7 +591,7 @@ Confirmed real, existing packages (`packages/jobs`, `packages/workflow`,
   owner-fenced background-job registry with cancellation
   (`job_kill`)/completion notices, but it is a **tool the driving model
   calls**, gated per `dsh-tool-subagent` row by `backgroundMode`. Our
-  `lead`/`reviewer` profiles give their driving DeepSeek model exactly one
+  `lead`/`reviewer` profiles give their driving relay model exactly one
   tool with a fixed one-shot call (per the P0 design already in place) —
   there is no background-job row configured, so this family isn't in our
   invocation path today. Adopting it would mean asking the *cheap DeepSeek
@@ -637,10 +641,10 @@ Confirmed real, existing packages (`packages/jobs`, `packages/workflow`,
   none of these exist upstream in a form our headless one-shot invocation
   could reuse; they operate one level up, around the `dsh` process
   boundary, exactly where P0/P1's own `lib/orchestrate.sh` already lives.
-- Failure-category detection for the *product* side (auth/quota/rate-limit/
+- Failure-category detection for the *product* and relay side (auth/quota/rate-limit/
   provider-unavailable) is necessarily best-effort text-pattern matching on
   the `dsh` process's own stdout/stderr, because our profiles' driving
-  model (DeepSeek) relays the subagent tool's error as its own final text
+  model relays the subagent tool's error as its own final text
   rather than DSH exposing the subagent's own structured diagnostic
   (`SubagentResult.diagnostic`'s stage/category fields) to an external
   caller — that diagnostic is documented as part of the *tool result seen

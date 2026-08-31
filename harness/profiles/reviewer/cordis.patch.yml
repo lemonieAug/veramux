@@ -16,6 +16,29 @@
 #      Codex's own native tool use cannot write, regardless of the reviewer
 #      prompt or of DSH's own permissionMode.
 
+# The relay starts on DeepSeek and may use the independent OpenAI route after
+# an eligible failure. This is separate from the Codex child process below,
+# which remains authenticated exclusively through CODEX_HOME.
+- id: llm-deepseek
+  config:
+    apiKeyEnv: VERAMUX_DEEPSEEK_API_KEY
+
+- id: llm-pi-ai
+  config:
+    providers:
+      openai:
+        apiKeyEnv: VERAMUX_OPENAI_API_KEY
+
+- id: agent-default-model
+  config:
+    provider: !!js process.env.VERAMUX_RELAY_PROVIDER === 'openai' ? 'openai' : 'deepseek-official'
+    model: !!js process.env.VERAMUX_RELAY_PROVIDER === 'openai' ? (process.env.VERAMUX_OPENAI_MODEL || 'gpt-5-mini') : (process.env.VERAMUX_DEEPSEEK_MODEL || 'deepseek-chat')
+
+# Prevent a shared $DSH_HOME/settings.yaml selection from overriding the
+# deterministic primary/fallback selection made by Veramux.
+- id: settings
+  disabled: true
+
 - id: system-prompt
   config:
     persona: |

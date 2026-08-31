@@ -35,6 +35,27 @@ for _dir in "${_path_dirs[@]}"; do
   fi
 done
 
+# Relay-provider states are reported independently from the remaining doctor
+# checks. Values are canaries and must never be printed.
+FAKE_HOME_PROVIDER="$TMP/provider-home"
+setup_fake_dsh_home "$FAKE_HOME_PROVIDER"
+
+out_both="$(VERAMUX_DEEPSEEK_API_KEY=deepseek-doctor-canary VERAMUX_OPENAI_API_KEY=openai-doctor-canary DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_both" "DeepSeek primary" "doctor reports DeepSeek as primary when both providers exist"
+assert_contains "$out_both" "OpenAI fallback" "doctor reports OpenAI as fallback when both providers exist"
+assert_not_contains "$out_both" "deepseek-doctor-canary" "doctor never prints the DeepSeek key"
+assert_not_contains "$out_both" "openai-doctor-canary" "doctor never prints the OpenAI key"
+
+out_primary="$(VERAMUX_DEEPSEEK_API_KEY=deepseek-doctor-canary DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_primary" "OpenAI fallback is not configured" "DeepSeek-only is a supported doctor state"
+
+out_degraded="$(VERAMUX_OPENAI_API_KEY=openai-doctor-canary DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_degraded" "DeepSeek primary is not configured" "OpenAI-only is reported as degraded"
+assert_contains "$out_degraded" "[degraded]" "OpenAI-only is non-blocking provider degradation"
+
+out_absent="$(DSH_HOME="$FAKE_HOME_PROVIDER" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_absent" "no relay credential is configured" "doctor blocks when both relay providers are absent"
+
 # 1) dsh missing entirely -> blocking failure, exit 2
 FAKE_HOME_NO_DSH="$TMP/no-dsh-home"
 setup_fake_dsh_home "$FAKE_HOME_NO_DSH"
