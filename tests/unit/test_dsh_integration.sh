@@ -8,10 +8,7 @@ source "$SELF_DIR/lib/harness.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 use_mock_dsh happy
-<<<<<<< HEAD
 use_mock_graphify
-=======
->>>>>>> f94c88fb5794dbde19e2366420f103952b0a86fb
 export MOCK_DSH_CALL_LOG="$TMP/dsh-calls.log"
 
 make_node_fixture "$TMP/default"
@@ -22,10 +19,7 @@ assert_eq "0" "$code" "legacy remains the default engine"
 assert_contains "$(cat "$MOCK_DSH_CALL_LOG")" $'tools_mode=native' "legacy workflow forces native mode instead of inheriting Code Mode"
 run_dir="$(find "$AGENT_STATE_HOME/runs" -path '*default*' -name run.json -printf '%h\n' | sort | tail -1)"
 assert_eq "legacy" "$(node "$ROOT_DIR/lib/json-tools.mjs" get-field engine_resolved < "$run_dir/run.json")" "default engine resolution is journaled as legacy"
-<<<<<<< HEAD
 assert_eq "0" "$([ ! -e "$TMP/default/graphify-out" ] && [ ! -e "$TMP/default/.claude" ] && [ ! -e "$TMP/default/CLAUDE.md" ]; echo $?)" "context does not bootstrap Graphify in a normal agent run"
-=======
->>>>>>> f94c88fb5794dbde19e2366420f103952b0a86fb
 
 make_node_fixture "$TMP/config-dsh"
 mkdir -p "$TMP/config-dsh/.agent"
@@ -58,7 +52,6 @@ assert_eq "0" "$code" "CLI engine overrides project config"
 run_dir="$(find "$AGENT_STATE_HOME/runs" -path '*cli-wins*' -name run.json -printf '%h\n' | sort | tail -1)"
 assert_eq "legacy" "$(node "$ROOT_DIR/lib/json-tools.mjs" get-field engine_resolved < "$run_dir/run.json")" "CLI precedence is persisted"
 
-<<<<<<< HEAD
 make_node_fixture "$TMP/dirty-baseline"
 printf 'user-owned draft\n' > "$TMP/dirty-baseline/NOTES.md"
 out="$(run_agent "$TMP/dirty-baseline" "Add validation to prevent negative numbers." 2>&1)"
@@ -85,8 +78,6 @@ assert_eq "0" "$code" "ambient both mode cannot break native execution"
 assert_contains "$(cat "$MOCK_DSH_CALL_LOG")" $'tools_mode=native' "ambient both mode is overwritten before every DSH call"
 unset DSH_TOOLS_MODE
 
-=======
->>>>>>> f94c88fb5794dbde19e2366420f103952b0a86fb
 make_node_fixture "$TMP/programmatic"
 : > "$MOCK_DSH_CALL_LOG"
 out="$(run_agent --engine dsh --programmatic "$TMP/programmatic" "task" 2>&1)"
@@ -121,10 +112,7 @@ out="$(run_agent --engine dsh "$TMP/unsupported" "task" 2>&1)"
 code=$?
 assert_eq "1" "$code" "unsupported DSH blocks only the opt-in DSH engine"
 assert_contains "$out" "DSH-native engine unavailable" "unsupported DSH reports a deterministic capability error"
-<<<<<<< HEAD
 assert_eq "" "$(cat "$MOCK_DSH_CALL_LOG")" "unsupported DSH does not invoke the normal DSH execution path"
-=======
->>>>>>> f94c88fb5794dbde19e2366420f103952b0a86fb
 unset MOCK_DSH_VERSION
 
 report_and_exit
