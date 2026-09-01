@@ -74,7 +74,7 @@ capability_probe() {
       fi ;;
 
     deepseek-harness/code-mode)
-      if ! command -v dsh >/dev/null 2>&1; then _capprobe_emit unknown "dsh not installed"; return 0; fi
+      if ! env_has_cmd dsh; then _capprobe_emit unknown "dsh not installed"; return 0; fi
       if dsh --help 2>&1 | grep -qiE 'code[ -]mode'; then
         _capprobe_emit pass "dsh --help advertises Code Mode"
       else
@@ -123,7 +123,7 @@ capability_probe() {
       fi ;;
 
     graphify/query-subcommand)
-      if ! command -v graphify >/dev/null 2>&1; then _capprobe_emit unknown "graphify not installed"; return 0; fi
+      if ! env_has_cmd graphify; then _capprobe_emit unknown "graphify not installed"; return 0; fi
       if graphify query --help >/dev/null 2>&1; then
         _capprobe_emit pass "graphify query subcommand present"
       else

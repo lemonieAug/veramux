@@ -40,6 +40,9 @@ deepseek-harness:
     - codex-subagent
 EOF
 export AGENT_COMPAT_FILE="$TMP/compat.yaml"
+export AGENT_INVENTORY_FIXTURE="$ROOT_DIR/tests/fixtures/update-registry/installed"
+export INSTALLED_git="2.49.0"
+unset INSTALLED_deepseek_harness
 
 rows="$(inventory_collect)"
 assert_eq "2" "$(printf '%s\n' "$rows" | grep -c .)" "one row per component"
@@ -47,10 +50,10 @@ assert_eq "2" "$(printf '%s\n' "$rows" | grep -c .)" "one row per component"
 git_row="$(printf '%s\n' "$rows" | grep '^git')"
 git_installed="$(printf '%s' "$git_row" | cut -f2)"
 git_status="$(printf '%s' "$git_row" | cut -f5)"
-assert_eq "1" "$([ -n "$git_installed" ] && [ "$git_installed" != "-" ] && echo 1 || echo 0)" "an installed system tool reports a real version"
-assert_eq "1" "$([ "$git_status" = "TESTED" ] || [ "$git_status" = "SUPPORTED" ] && echo 1 || echo 0)" "an installed matching tool is TESTED/SUPPORTED"
+assert_eq "2.49.0" "$git_installed" "the fixture controls the reported system-tool version"
+assert_eq "TESTED" "$git_status" "the fixture makes compatibility deterministic"
 
-# deepseek-harness is not installed on the test box -> MISSING, empty version marker
+# Fixture deliberately reports no DSH -> MISSING, independent of the host.
 dsh_row="$(printf '%s\n' "$rows" | grep '^deepseek-harness')"
 assert_eq "-" "$(printf '%s' "$dsh_row" | cut -f2)" "a missing component's version field is the '-' placeholder (never a collapsed empty field)"
 assert_eq "MISSING" "$(printf '%s' "$dsh_row" | cut -f5)" "a missing component is MISSING"

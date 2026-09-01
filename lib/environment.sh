@@ -4,6 +4,10 @@
 set -euo pipefail
 
 env_has_cmd() {
+  # Test-only deterministic absence seam. Production leaves this unset; unit
+  # tests can model a missing optional tool without depending on host PATH.
+  local hidden=" ${AGENT_TEST_HIDDEN_COMMANDS:-} "
+  [[ "$hidden" == *" $1 "* ]] && return 1
   command -v "$1" >/dev/null 2>&1
 }
 

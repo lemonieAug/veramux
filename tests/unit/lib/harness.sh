@@ -108,6 +108,23 @@ use_mock_graphify() {
   export PATH="$TESTS_DIR/fixtures/mock-graphify:$PATH"
 }
 
+# Hide optional host tools through lib/environment.sh's explicit test seam.
+# This is portable to Linux and Git Bash, unlike trying to reconstruct PATH.
+hide_test_commands() {
+  local command
+  for command in "$@"; do
+    case " ${AGENT_TEST_HIDDEN_COMMANDS:-} " in
+      *" $command "*) ;;
+      *) AGENT_TEST_HIDDEN_COMMANDS="${AGENT_TEST_HIDDEN_COMMANDS:+$AGENT_TEST_HIDDEN_COMMANDS }$command" ;;
+    esac
+  done
+  export AGENT_TEST_HIDDEN_COMMANDS
+}
+
+show_test_commands() {
+  unset AGENT_TEST_HIDDEN_COMMANDS
+}
+
 # Starts the mock claude-mem worker on a free-ish port, exports
 # CLAUDE_MEM_WORKER_PORT so lib/memory.sh finds it, and waits briefly for it
 # to come up. Caller must call stop_mock_memory_server in a trap/cleanup.

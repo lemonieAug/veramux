@@ -43,7 +43,8 @@ assert_eq "fail" "$(printf '%s' "$out" | cut -f1)" "B: a dsh whose --help drops 
 printf '#!/usr/bin/env bash\necho "graphify 0.10.0"\n' > "$TMP/fakebin/graphify"
 chmod +x "$TMP/fakebin/graphify"
 export HOME="$TMP/home-no-skill"; mkdir -p "$HOME/.claude"
-out="$(PATH="$TMP/fakebin:$PATH" capability_probe graphify skill-installed-where-expected)"
+mkdir -p "$TMP/workspace-no-skill"
+out="$(cd "$TMP/workspace-no-skill" && PATH="$TMP/fakebin:$PATH" capability_probe graphify skill-installed-where-expected)"
 assert_eq "fail" "$(printf '%s' "$out" | cut -f1)" "C: a Graphify install with no SKILL.md at an expected path probes FAIL"
 assert_contains "$out" "SKILL.md" "C: the failure explains the skill file is missing"
 

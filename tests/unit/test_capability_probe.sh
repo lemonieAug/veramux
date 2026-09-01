@@ -97,7 +97,9 @@ deepseek-harness:
     - code-mode
 EOF
 DSH_HOME="$TMP/dsh-good" # dsh binary still absent -> code-mode probes unknown
+hide_test_commands dsh
 assert_eq "UNVERIFIED" "$(capability_verdict deepseek-harness)" "code-mode with no dsh binary is UNVERIFIED, never OK"
+show_test_commands
 
 # an actual failure dominates
 export DSH_HOME="$TMP/dsh-bad-lead"

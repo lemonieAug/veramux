@@ -87,8 +87,10 @@ out="$(stage_candidate git 2.50.0)"
 assert_eq "staging_not_available" "$(stage_result "$out")" "a system component cannot be staged in isolation"
 
 # --- bundle with no dsh present: not available ---
+hide_test_commands dsh
 out="$(stage_candidate deepseek-harness 0.1.2)"
 assert_eq "staging_not_available" "$(stage_result "$out")" "a DSH profile bundle is staging_not_available without a real dsh"
+show_test_commands
 
 # --- staging leaves nothing behind ---
 export AGENT_STAGE_INSTALL_FIXTURE="$TMP/install-ok"

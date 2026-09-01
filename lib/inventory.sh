@@ -24,7 +24,7 @@ _inv_semver() {
 # empty when the command is absent or produces nothing parseable.
 _inv_cli_version() {
   local cmd="$1"; shift
-  command -v "$cmd" >/dev/null 2>&1 || return 0
+  env_has_cmd "$cmd" || return 0
   local raw
   if [ "$#" -gt 0 ]; then
     raw="$("$cmd" "$@" 2>/dev/null | head -3)"

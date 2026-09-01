@@ -61,7 +61,7 @@ stage_candidate() {
       echo "staging: $component is a system component — isolation is not applicable."
       echo "staging_not_available"; return 0 ;;
     bundle)
-      if ! command -v dsh >/dev/null 2>&1 && [ -z "${AGENT_STAGE_INSTALL_FIXTURE:-}" ]; then
+      if ! env_has_cmd dsh && [ -z "${AGENT_STAGE_INSTALL_FIXTURE:-}" ]; then
         echo "staging: a DSH profile bundle can only be verified by mutating the real profile (dsh plugin add) — refusing to do that in a staging step."
         echo "staging_not_available"; return 0
       fi ;;

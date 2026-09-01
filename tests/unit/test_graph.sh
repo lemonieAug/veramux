@@ -12,6 +12,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 # Without graphify on PATH: every function degrades to "unavailable",
 # never an error.
+hide_test_commands graphify
 mkdir -p "$TMP/nograph"
 graph_available
 assert_eq "1" "$?" "graphify not on PATH -> unavailable"
@@ -19,6 +20,7 @@ graph_query "$TMP/nograph" "anything" 100
 assert_eq "1" "$?" "query falls back cleanly when graphify is absent"
 
 # With the mock graphify installed
+show_test_commands
 use_mock_graphify
 mkdir -p "$TMP/withgraph"
 
