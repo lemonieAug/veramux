@@ -32,6 +32,7 @@ deterministic policy into an LLM or a DSH workflow.
 
 ## Boundaries
 
+<<<<<<< HEAD
 Claude Code is the only implementation writer. Codex is an independent reviewer running
 with a dedicated `CODEX_HOME` and read-only sandbox. Context gathering is
 read-only with respect to the project workspace: it may query a graph that an
@@ -40,6 +41,12 @@ artifacts during an orchestration run. Before context starts, Veramux records
 a run-owned baseline of Git-visible files; reviewer diffs compare that baseline
 with the post-lead workspace so pre-existing dirty user changes are excluded.
 Validation and risk remain deterministic. DSH sessions do not replace the workspace lock, and
+=======
+Claude Code is the only writer. Codex is an independent reviewer running
+with a dedicated `CODEX_HOME` and read-only sandbox. The orchestrator gathers
+context and coordinates; it does not acquire write tools. Validation and risk
+remain deterministic. DSH sessions do not replace the workspace lock, and
+>>>>>>> f94c88fb5794dbde19e2366420f103952b0a86fb
 the Veramux journal remains authoritative for resume.
 
 ## Web UI

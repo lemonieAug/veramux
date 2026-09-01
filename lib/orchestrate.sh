@@ -85,7 +85,11 @@ _orchestrate_call_dsh_provider_tracked() {
     # parent-shell function being exported.
     proc_call_with_timeout "$run_dir" "$timeout_s" "$grace_s" "$out_file" -- \
       bash -c '
+<<<<<<< HEAD
         source "$5"
+=======
+        source "$6"
+>>>>>>> f94c88fb5794dbde19e2366420f103952b0a86fb
         dsh_integration_exec "$1" "$2" "$3" "$4"
       ' _ "$workspace" "$profile" "$message" "$relay_provider" "$_ORCH_LIB_DIR/dsh_integration.sh" || code=$?
 
@@ -542,12 +546,17 @@ orchestrate_run() {
     return 1
   fi
   if [ "$engine_resolved" = dsh ] && ! dsh_engine_available; then
+<<<<<<< HEAD
     local dsh_support_status dsh_unavailable_message
     dsh_support_status="$(dsh_engine_support_status)"
     dsh_unavailable_message="DSH-native engine unavailable: unsupported or missing dsh ($dsh_support_status)"
     journal_run_update "$run_dir" "engine_requested=$engine_requested" "engine_resolved=dsh" "tool_mode_requested=$tool_mode_requested" "tool_mode_resolved=$tool_mode_resolved"
     _orchestrate_finish "$run_dir" "$workspace" FAILED CONFIGURATION configuration "$dsh_unavailable_message"
     echo "FINAL RESULT: error — $dsh_unavailable_message" >&2
+=======
+    journal_run_update "$run_dir" "engine_requested=$engine_requested" "engine_resolved=dsh" "tool_mode_requested=$tool_mode_requested" "tool_mode_resolved=$tool_mode_resolved"
+    _orchestrate_finish "$run_dir" "$workspace" FAILED CONFIGURATION configuration "DSH-native engine unavailable: unsupported or missing dsh ($(dsh_engine_support_status))"
+>>>>>>> f94c88fb5794dbde19e2366420f103952b0a86fb
     workspace_lock_release "$workspace" "$run_id" >/dev/null 2>&1 || true
     return 1
   fi
