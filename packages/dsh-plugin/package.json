@@ -1,0 +1,35 @@
+{
+  "name": "veramux-dsh-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Veramux deterministic orchestration bundle for DeepSeek Harness Web",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./runtime": "./src/runtime.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "license": "UNLICENSED",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.1"
+  }
+}

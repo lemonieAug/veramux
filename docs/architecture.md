@@ -44,5 +44,13 @@ the Veramux journal remains authoritative for resume.
 
 ## Web UI
 
-DSH Web is architecture-ready for future integration. Veramux has no Web UI
-in this phase and no UI is a source of workflow state.
+DSH Web is the host UI and can load the local `veramux-dsh-plugin` bundle.
+Its single capability, `veramux_run(workspace, task)`, starts the existing
+`agent --engine dsh --tool-mode native` CLI in a managed subprocess. Veramux
+remains the source of truth for workflow state and reads its run-owned final
+artifact before returning a result to the Harness.
+
+The Web profile never receives Claude Code or Codex as free tools. Those
+remain private to the `lead` and `reviewer` profiles, respectively. The
+plugin does not initialize Graphify or write project configuration; it only
+canonicalizes the workspace and delegates to the deterministic controller.

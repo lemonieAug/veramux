@@ -112,4 +112,16 @@ echo '{"schema_version":1,"state":"COMPLETED"}' > "$CLEAN_STATE/runs/some-projec
 out_clean="$(AGENT_STATE_HOME="$CLEAN_STATE" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
 assert_contains "$out_clean" "no corrupt run journal detected" "doctor reports clean journals as clean, not a false positive"
 
+# Web integration is optional: when installed, doctor reports the one
+# high-level capability without treating private lead/reviewer tools as Web tools.
+FAKE_HOME_WEB="$TMP/web-home"
+setup_fake_dsh_home "$FAKE_HOME_WEB"
+mkdir -p "$FAKE_HOME_WEB/profiles/web"
+cat > "$FAKE_HOME_WEB/profiles/web/package.json" <<'EOF'
+{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","veramux-dsh-plugin"]}}}
+EOF
+out_web="$(DSH_HOME="$FAKE_HOME_WEB" PATH="$PATH_WITHOUT_DSH" bash "$ROOT_DIR/scripts/doctor.sh" 2>&1)"
+assert_contains "$out_web" "Veramux DSH plugin installed in the web profile" "doctor detects the installed Web bundle"
+assert_contains "$out_web" "veramux_run capability" "doctor reports the high-level Web capability"
+
 report_and_exit

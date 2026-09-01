@@ -6,6 +6,9 @@ in charge of running Claude Code as the implementer and Codex as an
 independent, mechanism-enforced read-only reviewer against your own
 projects.
 
+DeepSeek Harness is the host platform/runtime/UI. Veramux is an opinionated
+orchestration plugin that provides a deterministic engineering pipeline.
+
 Veramux is migrating from an external orchestration engine toward an
 opinionated engineering integration on top of DSH. This release is a **hybrid
 DSH-native migration**: `legacy` remains the default deterministic controller;
@@ -193,14 +196,23 @@ agent doctor
 2. Runs [`scripts/configure.sh`](scripts/configure.sh), which creates the
    `lead` and `reviewer` DSH profiles under `$DSH_HOME/profiles/` using the
    official `dsh plugin --profile <name> add ...` command (we never
-   hand-author a profile's `package.json`/bundle list) and copies our
-   `cordis.patch.yml` templates into them.
+   hand-author a profile's `package.json`/bundle list), copies our
+   `cordis.patch.yml` templates into them, and adds the local Veramux bundle
+   to the `web` profile without changing its existing patch layer.
 3. Prints exactly what to do for authentication (next section) — it never
    logs in on your behalf and never stores a password or token itself.
 
 No `sudo` is used. If a system-level dependency is genuinely missing (e.g.
 Node itself), the script tells you the exact command to run and stops
 instead of guessing.
+
+### DSH Web
+
+Start the Harness Web host with `dsh --profile web`. The model can call only
+`veramux_run` for this integration, supplying an existing workspace and a
+task. That capability starts the established deterministic Veramux pipeline;
+it does not expose Claude Code or Codex as Web tools. Claude remains private
+to `lead`, and Codex remains private to the read-only `reviewer` profile.
 
 ## Authentication
 

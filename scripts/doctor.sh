@@ -89,6 +89,15 @@ fi
 ok "programmatic primitive: $(dsh_programmatic_primitive) exists upstream, but is disabled by Veramux policy"
 info "reason: current CodeRuntime is not a security boundary and would violate the single-writer boundary"
 
+section "DSH Web integration (optional)"
+WEB_PKG="$DSH_HOME_DIR/profiles/web/package.json"
+if env_profile_has_bundle "$WEB_PKG" 'veramux-dsh-plugin'; then
+  ok "Veramux DSH plugin installed in the web profile"
+  ok "web profile exposes the veramux_run capability"
+else
+  info "Veramux DSH plugin is not installed in the web profile; CLI orchestration remains available"
+fi
+
 section "Claude"
 if env_has_cmd claude; then
   ok "claude CLI present on PATH ($(claude --version 2>/dev/null | head -1 || echo 'version unknown'))"

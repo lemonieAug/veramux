@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Idempotent: (re)creates the `lead` and `reviewer` DSH profiles from the
-# templates under harness/profiles/, using the official `dsh plugin` command
+# templates under harness/profiles/ and adds the local Web bundle using the official `dsh plugin` command
 # to manage bundles (we never hand-author a profile's package.json/bundles
 # list — see docs/upstream-findings.md). Safe to re-run any time, including
 # after `versions.yaml` changes.
@@ -54,10 +54,23 @@ setup_reviewer_profile() {
   echo "== reviewer profile ready at $profile_dir =="
 }
 
+setup_web_profile() {
+  echo "== configuring profile: web =="
+  local plugin_dir="$ROOT_DIR/packages/dsh-plugin"
+  if [ ! -f "$plugin_dir/package.json" ] || [ ! -f "$plugin_dir/pnpm-lock.yaml" ]; then
+    echo "error: local Veramux DSH bundle is incomplete: $plugin_dir" >&2
+    exit 1
+  fi
+  pnpm --dir "$plugin_dir" install --frozen-lockfile
+  dsh plugin --profile web add "$plugin_dir"
+  echo "== web profile has the Veramux capability bundle =="
+}
+
 main() {
   require_dsh
   setup_lead_profile
   setup_reviewer_profile
+  setup_web_profile
   echo
   echo "Done. Verify with: agent doctor"
 }

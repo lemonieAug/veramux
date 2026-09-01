@@ -1,0 +1,7 @@
+# The Web profile receives one high-level Veramux tool. Lead and reviewer
+# profiles remain independent private compositions owned by Veramux.
+- insert:
+    - id: veramux
+      name: veramux-dsh-plugin
+      config:
+        agentPath: !!js process.env.VERAMUX_AGENT_PATH ?? 'agent'

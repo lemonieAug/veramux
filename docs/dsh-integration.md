@@ -21,3 +21,25 @@ fallback, validation, risk, locking and journaling.
 DSH has workflow/delegation primitives, but they are not yet the source of
 truth for Veramux state. A future migration requires parity tests for journal,
 lock, resume, validation, risk, review and rollback first.
+
+## Web bundle
+
+`packages/dsh-plugin` is a local DSH bundle for profile `web`. It contributes
+only `veramux_run(workspace, task)` and invokes the established CLI with the
+fixed `--engine dsh --tool-mode native` arguments. The caller cannot request
+programmatic execution, disable validation/baseline/policy, or select a
+writer/reviewer tool.
+
+Install it locally with:
+
+```sh
+pnpm --dir packages/dsh-plugin install --frozen-lockfile
+dsh plugin --profile web add ./packages/dsh-plugin
+dsh --profile web
+```
+
+`scripts/configure.sh` performs the same idempotent local setup after it has
+configured the private profiles. The tool uses DSH's subprocess capability and
+the tool execution `AbortSignal`; cancellation terminates the managed process
+tree and waits for it to exit. It returns Veramux's structured `final.json`
+when available rather than using the lead model response as the outcome.
